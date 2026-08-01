@@ -70,7 +70,7 @@ impl WorkflowDefinition {
         Ok(())
     }
 
-    // DFS helper for validating task dependency cycles
+    // DFS helper for validating task dependency cycles.
     fn check_task_dependency_cycle(
         task_id: WorkflowTaskId,
         tasks: &HashMap<WorkflowTaskId, &WorkflowTask>,
