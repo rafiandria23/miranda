@@ -4,6 +4,9 @@ use thiserror::Error;
 pub enum WorkflowError {
     #[error("workflow name is invalid")]
     InvalidName,
+
+    #[error("workflow version is invalid: {0}")]
+    InvalidVersion(#[from] WorkflowVersionError),
 }
 
 #[derive(Debug, Error)]
