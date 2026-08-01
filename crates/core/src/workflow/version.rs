@@ -42,14 +42,14 @@ mod tests {
         let workflow_id = WorkflowId::new();
         let workflow_version = WorkflowVersion::new(workflow_id, 3).unwrap();
 
-        assert_eq!(workflow_version.version, 3);
+        assert_eq!(workflow_version.version(), 3);
     }
 
     #[test]
     fn rejects_zero_version() {
         let workflow_id = WorkflowId::new();
-        let result = WorkflowVersion::new(workflow_id, 0);
+        let workflow_version = WorkflowVersion::new(workflow_id, 0);
 
-        assert!(result.is_err());
+        assert!(workflow_version.is_err());
     }
 }

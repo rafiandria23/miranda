@@ -5,16 +5,22 @@ use super::{AttemptError, AttemptStatus};
 pub struct Attempt {
     id: AttemptId,
     task_id: TaskId,
+    number: u32,
     status: AttemptStatus,
 }
 
 impl Attempt {
-    pub fn new(task_id: TaskId) -> Self {
-        Self {
+    pub fn new(task_id: TaskId, number: u32) -> Result<Self, AttemptError> {
+        if number == 0 {
+            return Err(AttemptError::InvalidNumber);
+        }
+
+        Ok(Self {
             id: AttemptId::new(),
             task_id,
+            number,
             status: AttemptStatus::Pending,
-        }
+        })
     }
 
     pub fn id(&self) -> AttemptId {
@@ -23,6 +29,10 @@ impl Attempt {
 
     pub fn task_id(&self) -> TaskId {
         self.task_id
+    }
+
+    pub fn number(&self) -> u32 {
+        self.number
     }
 
     pub fn status(&self) -> AttemptStatus {
@@ -76,15 +86,24 @@ mod tests {
     #[test]
     fn creates_attempt() {
         let task_id = TaskId::new();
-        let attempt = Attempt::new(task_id);
+        let attempt = Attempt::new(task_id, 3).unwrap();
 
+        assert_eq!(attempt.number(), 3);
         assert_eq!(attempt.status(), AttemptStatus::Pending);
+    }
+
+    #[test]
+    fn rejects_zero_number() {
+        let task_id = TaskId::new();
+        let attempt = Attempt::new(task_id, 0);
+
+        assert!(attempt.is_err());
     }
 
     #[test]
     fn pending_can_start() {
         let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id);
+        let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
 
@@ -94,7 +113,7 @@ mod tests {
     #[test]
     fn running_can_succeed() {
         let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id);
+        let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
         attempt.succeed().unwrap();
@@ -105,7 +124,7 @@ mod tests {
     #[test]
     fn running_can_fail() {
         let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id);
+        let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
         attempt.fail().unwrap();
@@ -116,7 +135,7 @@ mod tests {
     #[test]
     fn running_can_cancel() {
         let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id);
+        let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
         attempt.cancel().unwrap();
@@ -127,7 +146,7 @@ mod tests {
     #[test]
     fn pending_cannot_succeed() {
         let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id);
+        let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         assert!(attempt.succeed().is_err());
     }
@@ -135,7 +154,7 @@ mod tests {
     #[test]
     fn pending_cannot_fail() {
         let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id);
+        let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         assert!(attempt.fail().is_err());
     }
@@ -143,7 +162,7 @@ mod tests {
     #[test]
     fn succeeded_cannot_restart() {
         let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id);
+        let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
         attempt.succeed().unwrap();
@@ -154,7 +173,7 @@ mod tests {
     #[test]
     fn failed_cannot_restart() {
         let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id);
+        let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
         attempt.fail().unwrap();
@@ -165,7 +184,7 @@ mod tests {
     #[test]
     fn cancelled_cannot_restart() {
         let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id);
+        let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
         attempt.cancel().unwrap();

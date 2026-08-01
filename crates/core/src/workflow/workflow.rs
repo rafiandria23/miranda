@@ -40,15 +40,15 @@ mod tests {
 
     #[test]
     fn rejects_empty_name() {
-        let result = Workflow::new("".to_owned());
+        let workflow = Workflow::new("".to_owned());
 
-        assert!(result.is_err());
+        assert!(workflow.is_err());
     }
 
     #[test]
     fn rejects_whitespace_name() {
-        let result = Workflow::new("   ".to_owned());
+        let workflow = Workflow::new("   ".to_owned());
 
-        assert!(result.is_err());
+        assert!(workflow.is_err());
     }
 }
