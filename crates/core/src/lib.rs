@@ -6,3 +6,6 @@ mod workflow;
 
 pub mod error;
 pub mod id;
+
+pub use execution::{Execution, ExecutionError, ExecutionStatus};
+pub use workflow::{Workflow, WorkflowVersion};
