@@ -24,6 +24,19 @@ impl Execution {
         }
     }
 
+    pub fn from_definition(
+        workflow_version_id: WorkflowVersionId,
+        definition: &WorkflowDefinition,
+    ) -> Result<Self, ExecutionError> {
+        let mut execution = Self::new(workflow_version_id);
+
+        for workflow_task in definition.tasks() {
+            execution.add_task(workflow_task.id())?;
+        }
+
+        Ok(execution)
+    }
+
     pub fn id(&self) -> ExecutionId {
         self.id
     }
@@ -131,6 +144,24 @@ mod tests {
 
         assert_eq!(execution.status(), ExecutionStatus::Pending);
         assert!(execution.tasks().is_empty());
+    }
+
+    #[test]
+    fn creates_execution_from_definition() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+
+        assert_eq!(execution.status(), ExecutionStatus::Pending);
+        assert_eq!(execution.tasks().len(), 1);
+        assert_eq!(execution.tasks()[0].workflow_task_id(), workflow_task_id);
+        assert_eq!(execution.tasks()[0].status(), TaskStatus::Pending);
     }
 
     #[test]
@@ -333,9 +364,9 @@ mod tests {
     #[test]
     fn no_tasks_are_ready_when_definition_is_empty() {
         let workflow_version_id = WorkflowVersionId::new();
-
-        let execution = Execution::new(workflow_version_id);
         let definition = WorkflowDefinition::new(vec![]).unwrap();
+
+        let execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
 
         assert!(execution.ready_tasks(&definition).is_empty());
     }
@@ -345,13 +376,12 @@ mod tests {
         let workflow_version_id = WorkflowVersionId::new();
         let workflow_task_id = WorkflowTaskId::new();
 
-        let mut execution = Execution::new(workflow_version_id);
-        execution.add_task(workflow_task_id).unwrap();
-
         let workflow_task =
             WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
 
         assert_eq!(execution.ready_tasks(&definition), vec![workflow_task_id]);
     }
@@ -362,17 +392,17 @@ mod tests {
         let dependency_id = WorkflowTaskId::new();
         let task_id = WorkflowTaskId::new();
 
-        let mut execution = Execution::new(workflow_version_id);
-
-        // The dependency exists in the definition but not in the execution.
-        execution.add_task(task_id).unwrap();
-
         let dependency = WorkflowTask::new(dependency_id, "validate".to_owned(), vec![]).unwrap();
 
         let task =
             WorkflowTask::new(task_id, "send_email".to_owned(), vec![dependency_id]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![dependency, task]).unwrap();
+
+        // The definition contains both tasks, but the runtime execution
+        // intentionally contains only the dependent task.
+        let mut execution = Execution::new(workflow_version_id);
+        execution.add_task(task_id).unwrap();
 
         assert!(execution.ready_tasks(&definition).is_empty());
     }
@@ -383,17 +413,14 @@ mod tests {
         let dependency_id = WorkflowTaskId::new();
         let task_id = WorkflowTaskId::new();
 
-        let mut execution = Execution::new(workflow_version_id);
-
-        execution.add_task(dependency_id).unwrap();
-        execution.add_task(task_id).unwrap();
-
         let dependency = WorkflowTask::new(dependency_id, "validate".to_owned(), vec![]).unwrap();
 
         let task =
             WorkflowTask::new(task_id, "send_email".to_owned(), vec![dependency_id]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![dependency, task]).unwrap();
+
+        let execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
 
         assert_eq!(execution.ready_tasks(&definition), vec![dependency_id]);
     }
@@ -404,17 +431,14 @@ mod tests {
         let dependency_id = WorkflowTaskId::new();
         let task_id = WorkflowTaskId::new();
 
-        let mut execution = Execution::new(workflow_version_id);
-
-        execution.add_task(dependency_id).unwrap();
-        execution.add_task(task_id).unwrap();
-
         let dependency = WorkflowTask::new(dependency_id, "validate".to_owned(), vec![]).unwrap();
 
         let task =
             WorkflowTask::new(task_id, "send_email".to_owned(), vec![dependency_id]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![dependency, task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
 
         assert_eq!(execution.ready_tasks(&definition), vec![dependency_id]);
 
@@ -431,12 +455,6 @@ mod tests {
         let second_dependency_id = WorkflowTaskId::new();
         let task_id = WorkflowTaskId::new();
 
-        let mut execution = Execution::new(workflow_version_id);
-
-        execution.add_task(first_dependency_id).unwrap();
-        execution.add_task(second_dependency_id).unwrap();
-        execution.add_task(task_id).unwrap();
-
         let first_dependency =
             WorkflowTask::new(first_dependency_id, "validate".to_owned(), vec![]).unwrap();
 
@@ -452,6 +470,8 @@ mod tests {
 
         let definition =
             WorkflowDefinition::new(vec![first_dependency, second_dependency, task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
 
         assert_eq!(
             execution.ready_tasks(&definition),
@@ -477,14 +497,12 @@ mod tests {
         let workflow_version_id = WorkflowVersionId::new();
         let workflow_task_id = WorkflowTaskId::new();
 
-        let mut execution = Execution::new(workflow_version_id);
-
-        execution.add_task(workflow_task_id).unwrap();
-
         let workflow_task =
             WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
 
         execution.tasks[0].start().unwrap();
 
@@ -496,14 +514,12 @@ mod tests {
         let workflow_version_id = WorkflowVersionId::new();
         let workflow_task_id = WorkflowTaskId::new();
 
-        let mut execution = Execution::new(workflow_version_id);
-
-        execution.add_task(workflow_task_id).unwrap();
-
         let workflow_task =
             WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
 
         execution.tasks[0].start().unwrap();
         execution.tasks[0].complete().unwrap();
