@@ -5,6 +5,7 @@ use crate::{
 
 use super::{TaskError, TaskStatus};
 
+#[derive(Debug)]
 pub struct Task {
     id: TaskId,
     execution_id: ExecutionId,

@@ -2,6 +2,7 @@ use crate::id::{AttemptId, TaskId};
 
 use super::{AttemptError, AttemptStatus};
 
+#[derive(Debug)]
 pub struct Attempt {
     id: AttemptId,
     task_id: TaskId,
