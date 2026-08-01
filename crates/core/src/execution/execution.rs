@@ -29,21 +29,6 @@ impl Execution {
         self.status
     }
 
-    pub fn start(&mut self) -> Result<(), ExecutionError> {
-        match self.status {
-            ExecutionStatus::Pending => {
-                self.status = ExecutionStatus::Running;
-
-                Ok(())
-            }
-
-            status => Err(ExecutionError::InvalidTransition {
-                from: status,
-                to: ExecutionStatus::Running,
-            }),
-        }
-    }
-
     fn transition_to(&mut self, target: ExecutionStatus) -> Result<(), ExecutionError> {
         let valid = match (self.status, target) {
             (ExecutionStatus::Pending, ExecutionStatus::Running) => true,
@@ -66,6 +51,10 @@ impl Execution {
         self.status = target;
 
         Ok(())
+    }
+
+    pub fn start(&mut self) -> Result<(), ExecutionError> {
+        self.transition_to(ExecutionStatus::Running)
     }
 
     pub fn complete(&mut self) -> Result<(), ExecutionError> {
