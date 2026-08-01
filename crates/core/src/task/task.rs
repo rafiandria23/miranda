@@ -1,4 +1,7 @@
-use crate::id::{ExecutionId, TaskId, WorkflowTaskId};
+use crate::{
+    Attempt,
+    id::{ExecutionId, TaskId, WorkflowTaskId},
+};
 
 use super::{TaskError, TaskStatus};
 
@@ -7,6 +10,7 @@ pub struct Task {
     execution_id: ExecutionId,
     workflow_task_id: WorkflowTaskId,
     status: TaskStatus,
+    attempts: Vec<Attempt>,
 }
 
 impl Task {
@@ -16,6 +20,7 @@ impl Task {
             execution_id,
             workflow_task_id,
             status: TaskStatus::Pending,
+            attempts: Vec::new(),
         }
     }
 
@@ -33,6 +38,10 @@ impl Task {
 
     pub fn status(&self) -> TaskStatus {
         self.status
+    }
+
+    pub fn attempts(&self) -> &[Attempt] {
+        &self.attempts
     }
 
     fn transition_to(&mut self, target: TaskStatus) -> Result<(), TaskError> {
@@ -73,10 +82,21 @@ impl Task {
     pub fn cancel(&mut self) -> Result<(), TaskError> {
         self.transition_to(TaskStatus::Cancelled)
     }
+
+    pub fn add_attempt(&mut self) -> Result<&Attempt, TaskError> {
+        let number = self.attempts.len() as u32 + 1;
+        let attempt = Attempt::new(self.id, number)?;
+
+        self.attempts.push(attempt);
+
+        Ok(self.attempts.last().expect("attempt was just added"))
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::AttemptStatus;
+
     use super::*;
 
     #[test]
@@ -89,6 +109,7 @@ mod tests {
         assert_eq!(task.execution_id(), execution_id);
         assert_eq!(task.workflow_task_id(), workflow_task_id);
         assert_eq!(task.status(), TaskStatus::Pending);
+        assert!(task.attempts().is_empty());
     }
 
     #[test]
@@ -218,5 +239,37 @@ mod tests {
         assert!(task.complete().is_err());
         assert!(task.fail().is_err());
         assert!(task.cancel().is_err());
+    }
+
+    #[test]
+    fn adds_first_attempt() {
+        let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let mut task = Task::new(execution_id, workflow_task_id);
+
+        let task_id = task.id();
+
+        let attempt = task.add_attempt().unwrap();
+
+        assert_eq!(attempt.task_id(), task_id);
+        assert_eq!(attempt.number(), 1);
+        assert_eq!(attempt.status(), AttemptStatus::Pending);
+        assert_eq!(task.attempts().len(), 1);
+    }
+
+    #[test]
+    fn adds_incrementing_attempts() {
+        let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let mut task = Task::new(execution_id, workflow_task_id);
+
+        task.add_attempt().unwrap();
+        task.add_attempt().unwrap();
+
+        assert_eq!(task.attempts().len(), 2);
+        assert_eq!(task.attempts()[0].number(), 1);
+        assert_eq!(task.attempts()[1].number(), 2);
     }
 }
