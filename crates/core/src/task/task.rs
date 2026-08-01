@@ -1,18 +1,20 @@
-use crate::id::{ExecutionId, TaskId};
+use crate::id::{ExecutionId, TaskId, WorkflowTaskId};
 
 use super::{TaskError, TaskStatus};
 
 pub struct Task {
     id: TaskId,
     execution_id: ExecutionId,
+    workflow_task_id: WorkflowTaskId,
     status: TaskStatus,
 }
 
 impl Task {
-    pub fn new(execution_id: ExecutionId) -> Self {
+    pub fn new(execution_id: ExecutionId, workflow_task_id: WorkflowTaskId) -> Self {
         Self {
             id: TaskId::new(),
             execution_id,
+            workflow_task_id,
             status: TaskStatus::Pending,
         }
     }
@@ -23,6 +25,10 @@ impl Task {
 
     pub fn execution_id(&self) -> ExecutionId {
         self.execution_id
+    }
+
+    pub fn workflow_task_id(&self) -> WorkflowTaskId {
+        self.workflow_task_id
     }
 
     pub fn status(&self) -> TaskStatus {
@@ -76,17 +82,21 @@ mod tests {
     #[test]
     fn creates_task() {
         let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
 
-        let task = Task::new(execution_id);
+        let task = Task::new(execution_id, workflow_task_id);
 
+        assert_eq!(task.execution_id(), execution_id);
+        assert_eq!(task.workflow_task_id(), workflow_task_id);
         assert_eq!(task.status(), TaskStatus::Pending);
     }
 
     #[test]
     fn pending_can_start() {
         let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
 
-        let mut task = Task::new(execution_id);
+        let mut task = Task::new(execution_id, workflow_task_id);
 
         task.start().unwrap();
 
@@ -96,8 +106,9 @@ mod tests {
     #[test]
     fn running_can_complete() {
         let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
 
-        let mut task = Task::new(execution_id);
+        let mut task = Task::new(execution_id, workflow_task_id);
 
         task.start().unwrap();
         task.complete().unwrap();
@@ -108,8 +119,9 @@ mod tests {
     #[test]
     fn running_can_fail() {
         let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
 
-        let mut task = Task::new(execution_id);
+        let mut task = Task::new(execution_id, workflow_task_id);
 
         task.start().unwrap();
         task.fail().unwrap();
@@ -120,8 +132,9 @@ mod tests {
     #[test]
     fn running_can_cancel() {
         let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
 
-        let mut task = Task::new(execution_id);
+        let mut task = Task::new(execution_id, workflow_task_id);
 
         task.start().unwrap();
         task.cancel().unwrap();
@@ -132,8 +145,9 @@ mod tests {
     #[test]
     fn pending_cannot_complete() {
         let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
 
-        let mut task = Task::new(execution_id);
+        let mut task = Task::new(execution_id, workflow_task_id);
 
         assert!(task.complete().is_err());
     }
@@ -141,45 +155,68 @@ mod tests {
     #[test]
     fn pending_cannot_fail() {
         let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
 
-        let mut task = Task::new(execution_id);
+        let mut task = Task::new(execution_id, workflow_task_id);
 
         assert!(task.fail().is_err());
     }
 
     #[test]
-    fn completed_cannot_restart() {
+    fn pending_cannot_cancel() {
         let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
 
-        let mut task = Task::new(execution_id);
+        let mut task = Task::new(execution_id, workflow_task_id);
+
+        assert!(task.cancel().is_err());
+    }
+
+    #[test]
+    fn completed_cannot_transition() {
+        let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let mut task = Task::new(execution_id, workflow_task_id);
 
         task.start().unwrap();
         task.complete().unwrap();
 
         assert!(task.start().is_err());
+        assert!(task.complete().is_err());
+        assert!(task.fail().is_err());
+        assert!(task.cancel().is_err());
     }
 
     #[test]
-    fn failed_cannot_restart() {
+    fn failed_cannot_transition() {
         let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
 
-        let mut task = Task::new(execution_id);
+        let mut task = Task::new(execution_id, workflow_task_id);
 
         task.start().unwrap();
         task.fail().unwrap();
 
         assert!(task.start().is_err());
+        assert!(task.complete().is_err());
+        assert!(task.fail().is_err());
+        assert!(task.cancel().is_err());
     }
 
     #[test]
-    fn cancelled_cannot_restart() {
+    fn cancelled_cannot_transition() {
         let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
 
-        let mut task = Task::new(execution_id);
+        let mut task = Task::new(execution_id, workflow_task_id);
 
         task.start().unwrap();
         task.cancel().unwrap();
 
         assert!(task.start().is_err());
+        assert!(task.complete().is_err());
+        assert!(task.fail().is_err());
+        assert!(task.cancel().is_err());
     }
 }

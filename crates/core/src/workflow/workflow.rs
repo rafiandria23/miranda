@@ -69,7 +69,7 @@ impl Workflow {
         Ok(self
             .versions
             .last()
-            .expect("workflow version was just inserted"))
+            .expect("workflow version was just added"))
     }
 }
 

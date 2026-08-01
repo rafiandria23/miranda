@@ -11,16 +11,16 @@ pub struct Attempt {
 
 impl Attempt {
     pub fn new(task_id: TaskId, number: u32) -> Result<Self, AttemptError> {
-        if number == 0 {
-            return Err(AttemptError::InvalidNumber);
-        }
-
-        Ok(Self {
+        let attempt = Self {
             id: AttemptId::new(),
             task_id,
             number,
             status: AttemptStatus::Pending,
-        })
+        };
+
+        attempt.validate()?;
+
+        Ok(attempt)
     }
 
     pub fn id(&self) -> AttemptId {
@@ -37,6 +37,20 @@ impl Attempt {
 
     pub fn status(&self) -> AttemptStatus {
         self.status
+    }
+
+    pub fn validate(&self) -> Result<(), AttemptError> {
+        self.validate_number()?;
+
+        Ok(())
+    }
+
+    fn validate_number(&self) -> Result<(), AttemptError> {
+        if self.number == 0 {
+            return Err(AttemptError::InvalidNumber);
+        }
+
+        Ok(())
     }
 
     fn transition_to(&mut self, target: AttemptStatus) -> Result<(), AttemptError> {
@@ -89,6 +103,7 @@ mod tests {
 
         let attempt = Attempt::new(task_id, 3).unwrap();
 
+        assert_eq!(attempt.task_id(), task_id);
         assert_eq!(attempt.number(), 3);
         assert_eq!(attempt.status(), AttemptStatus::Pending);
     }
@@ -100,6 +115,15 @@ mod tests {
         let attempt = Attempt::new(task_id, 0);
 
         assert!(attempt.is_err());
+    }
+
+    #[test]
+    fn validates_attempt() {
+        let task_id = TaskId::new();
+
+        let attempt = Attempt::new(task_id, 3).unwrap();
+
+        assert!(attempt.validate().is_ok());
     }
 
     #[test]
@@ -161,13 +185,23 @@ mod tests {
     #[test]
     fn pending_cannot_fail() {
         let task_id = TaskId::new();
+
         let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         assert!(attempt.fail().is_err());
     }
 
     #[test]
-    fn succeeded_cannot_restart() {
+    fn pending_cannot_cancel() {
+        let task_id = TaskId::new();
+
+        let mut attempt = Attempt::new(task_id, 3).unwrap();
+
+        assert!(attempt.cancel().is_err());
+    }
+
+    #[test]
+    fn succeeded_cannot_transition() {
         let task_id = TaskId::new();
 
         let mut attempt = Attempt::new(task_id, 3).unwrap();
@@ -176,10 +210,13 @@ mod tests {
         attempt.succeed().unwrap();
 
         assert!(attempt.start().is_err());
+        assert!(attempt.succeed().is_err());
+        assert!(attempt.fail().is_err());
+        assert!(attempt.cancel().is_err());
     }
 
     #[test]
-    fn failed_cannot_restart() {
+    fn failed_cannot_transition() {
         let task_id = TaskId::new();
 
         let mut attempt = Attempt::new(task_id, 3).unwrap();
@@ -188,10 +225,13 @@ mod tests {
         attempt.fail().unwrap();
 
         assert!(attempt.start().is_err());
+        assert!(attempt.succeed().is_err());
+        assert!(attempt.fail().is_err());
+        assert!(attempt.cancel().is_err());
     }
 
     #[test]
-    fn cancelled_cannot_restart() {
+    fn cancelled_cannot_transition() {
         let task_id = TaskId::new();
 
         let mut attempt = Attempt::new(task_id, 3).unwrap();
@@ -200,5 +240,8 @@ mod tests {
         attempt.cancel().unwrap();
 
         assert!(attempt.start().is_err());
+        assert!(attempt.succeed().is_err());
+        assert!(attempt.fail().is_err());
+        assert!(attempt.cancel().is_err());
     }
 }

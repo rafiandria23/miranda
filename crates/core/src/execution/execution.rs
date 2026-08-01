@@ -1,4 +1,7 @@
-use crate::id::{ExecutionId, WorkflowVersionId};
+use crate::{
+    Task,
+    id::{ExecutionId, WorkflowTaskId, WorkflowVersionId},
+};
 
 use super::{ExecutionError, ExecutionStatus};
 
@@ -6,6 +9,7 @@ pub struct Execution {
     id: ExecutionId,
     workflow_version_id: WorkflowVersionId,
     status: ExecutionStatus,
+    tasks: Vec<Task>,
 }
 
 impl Execution {
@@ -14,6 +18,7 @@ impl Execution {
             id: ExecutionId::new(),
             workflow_version_id,
             status: ExecutionStatus::Pending,
+            tasks: Vec::new(),
         }
     }
 
@@ -27,6 +32,10 @@ impl Execution {
 
     pub fn status(&self) -> ExecutionStatus {
         self.status
+    }
+
+    pub fn tasks(&self) -> &[Task] {
+        &self.tasks
     }
 
     fn transition_to(&mut self, target: ExecutionStatus) -> Result<(), ExecutionError> {
@@ -72,10 +81,20 @@ impl Execution {
     pub fn terminate(&mut self) -> Result<(), ExecutionError> {
         self.transition_to(ExecutionStatus::Terminated)
     }
+
+    pub fn add_task(&mut self, workflow_task_id: WorkflowTaskId) -> Result<&Task, ExecutionError> {
+        let task = Task::new(self.id, workflow_task_id);
+
+        self.tasks.push(task);
+
+        Ok(self.tasks.last().expect("task was just added"))
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use crate::TaskStatus;
+
     use super::*;
 
     #[test]
@@ -165,7 +184,25 @@ mod tests {
     }
 
     #[test]
-    fn completed_cannot_restart() {
+    fn pending_cannot_cancel() {
+        let workflow_version_id = WorkflowVersionId::new();
+
+        let mut execution = Execution::new(workflow_version_id);
+
+        assert!(execution.cancel().is_err());
+    }
+
+    #[test]
+    fn pending_cannot_terminate() {
+        let workflow_version_id = WorkflowVersionId::new();
+
+        let mut execution = Execution::new(workflow_version_id);
+
+        assert!(execution.terminate().is_err());
+    }
+
+    #[test]
+    fn completed_cannot_transition() {
         let workflow_version_id = WorkflowVersionId::new();
 
         let mut execution = Execution::new(workflow_version_id);
@@ -174,10 +211,14 @@ mod tests {
         execution.complete().unwrap();
 
         assert!(execution.start().is_err());
+        assert!(execution.complete().is_err());
+        assert!(execution.fail().is_err());
+        assert!(execution.cancel().is_err());
+        assert!(execution.terminate().is_err());
     }
 
     #[test]
-    fn failed_cannot_restart() {
+    fn failed_cannot_transition() {
         let workflow_version_id = WorkflowVersionId::new();
 
         let mut execution = Execution::new(workflow_version_id);
@@ -186,10 +227,14 @@ mod tests {
         execution.fail().unwrap();
 
         assert!(execution.start().is_err());
+        assert!(execution.complete().is_err());
+        assert!(execution.fail().is_err());
+        assert!(execution.cancel().is_err());
+        assert!(execution.terminate().is_err());
     }
 
     #[test]
-    fn cancelled_cannot_restart() {
+    fn cancelled_cannot_transition() {
         let workflow_version_id = WorkflowVersionId::new();
 
         let mut execution = Execution::new(workflow_version_id);
@@ -198,10 +243,14 @@ mod tests {
         execution.cancel().unwrap();
 
         assert!(execution.start().is_err());
+        assert!(execution.complete().is_err());
+        assert!(execution.fail().is_err());
+        assert!(execution.cancel().is_err());
+        assert!(execution.terminate().is_err());
     }
 
     #[test]
-    fn terminated_cannot_restart() {
+    fn terminated_cannot_transition() {
         let workflow_version_id = WorkflowVersionId::new();
 
         let mut execution = Execution::new(workflow_version_id);
@@ -210,5 +259,48 @@ mod tests {
         execution.terminate().unwrap();
 
         assert!(execution.start().is_err());
+        assert!(execution.complete().is_err());
+        assert!(execution.fail().is_err());
+        assert!(execution.cancel().is_err());
+        assert!(execution.terminate().is_err());
+    }
+
+    #[test]
+    fn adds_task() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let mut execution = Execution::new(workflow_version_id);
+
+        let execution_id = execution.id();
+
+        let task = execution.add_task(workflow_task_id).unwrap();
+
+        assert_eq!(task.execution_id(), execution_id);
+        assert_eq!(task.workflow_task_id(), workflow_task_id);
+        assert_eq!(task.status(), TaskStatus::Pending);
+        assert_eq!(execution.tasks().len(), 1);
+    }
+
+    #[test]
+    fn adds_multiple_tasks() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let first_workflow_task_id = WorkflowTaskId::new();
+        let second_workflow_task_id = WorkflowTaskId::new();
+
+        let mut execution = Execution::new(workflow_version_id);
+
+        execution.add_task(first_workflow_task_id).unwrap();
+        execution.add_task(second_workflow_task_id).unwrap();
+
+        assert_eq!(execution.tasks().len(), 2);
+        assert_eq!(
+            execution.tasks()[0].workflow_task_id(),
+            first_workflow_task_id
+        );
+        assert_eq!(
+            execution.tasks()[1].workflow_task_id(),
+            second_workflow_task_id
+        );
     }
 }
