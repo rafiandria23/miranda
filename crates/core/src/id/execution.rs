@@ -14,13 +14,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generate_unique_ids() {
-        let first = ExecutionId::new();
-        let second = ExecutionId::new();
-        let third = ExecutionId::new();
+    fn creates_execution_id() {
+        let execution_id = ExecutionId::new();
 
-        assert_ne!(first, second);
-        assert_ne!(second, third);
-        assert_ne!(third, first);
+        assert_ne!(execution_id, ExecutionId::new());
     }
 }

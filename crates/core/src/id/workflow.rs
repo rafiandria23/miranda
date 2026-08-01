@@ -14,13 +14,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generate_unique_ids() {
-        let first = WorkflowId::new();
-        let second = WorkflowId::new();
-        let third = WorkflowId::new();
+    fn creates_workflow_id() {
+        let workflow_id = WorkflowId::new();
 
-        assert_ne!(first, second);
-        assert_ne!(second, third);
-        assert_ne!(third, first);
+        assert_ne!(workflow_id, WorkflowId::new());
     }
 }

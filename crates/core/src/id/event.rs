@@ -1,9 +1,9 @@
 use uuid::Uuid;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TaskId(Uuid);
+pub struct EventId(Uuid);
 
-impl TaskId {
+impl EventId {
     pub fn new() -> Self {
         Self(Uuid::now_v7())
     }
@@ -14,9 +14,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn creates_task_id() {
-        let task_id = TaskId::new();
+    fn creates_event_id() {
+        let event_id = EventId::new();
 
-        assert_ne!(task_id, TaskId::new());
+        assert_ne!(event_id, EventId::new());
     }
 }

@@ -1,10 +1,10 @@
 mod attempt;
-mod event;
 mod execution;
 mod task;
 mod workflow;
 
 pub mod error;
+pub mod event;
 pub mod id;
 
 pub use attempt::{Attempt, AttemptError, AttemptStatus};

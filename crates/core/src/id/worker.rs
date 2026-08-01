@@ -14,13 +14,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn generate_unique_ids() {
-        let first = WorkerId::new();
-        let second = WorkerId::new();
-        let third = WorkerId::new();
+    fn creates_worker_id() {
+        let worker_id = WorkerId::new();
 
-        assert_ne!(first, second);
-        assert_ne!(second, third);
-        assert_ne!(third, first);
+        assert_ne!(worker_id, WorkerId::new());
     }
 }
