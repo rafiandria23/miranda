@@ -86,6 +86,7 @@ mod tests {
     #[test]
     fn creates_attempt() {
         let task_id = TaskId::new();
+
         let attempt = Attempt::new(task_id, 3).unwrap();
 
         assert_eq!(attempt.number(), 3);
@@ -95,6 +96,7 @@ mod tests {
     #[test]
     fn rejects_zero_number() {
         let task_id = TaskId::new();
+
         let attempt = Attempt::new(task_id, 0);
 
         assert!(attempt.is_err());
@@ -103,6 +105,7 @@ mod tests {
     #[test]
     fn pending_can_start() {
         let task_id = TaskId::new();
+
         let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
@@ -113,6 +116,7 @@ mod tests {
     #[test]
     fn running_can_succeed() {
         let task_id = TaskId::new();
+
         let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
@@ -124,6 +128,7 @@ mod tests {
     #[test]
     fn running_can_fail() {
         let task_id = TaskId::new();
+
         let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
@@ -135,6 +140,7 @@ mod tests {
     #[test]
     fn running_can_cancel() {
         let task_id = TaskId::new();
+
         let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
@@ -146,6 +152,7 @@ mod tests {
     #[test]
     fn pending_cannot_succeed() {
         let task_id = TaskId::new();
+
         let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         assert!(attempt.succeed().is_err());
@@ -162,6 +169,7 @@ mod tests {
     #[test]
     fn succeeded_cannot_restart() {
         let task_id = TaskId::new();
+
         let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
@@ -173,6 +181,7 @@ mod tests {
     #[test]
     fn failed_cannot_restart() {
         let task_id = TaskId::new();
+
         let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();
@@ -184,6 +193,7 @@ mod tests {
     #[test]
     fn cancelled_cannot_restart() {
         let task_id = TaskId::new();
+
         let mut attempt = Attempt::new(task_id, 3).unwrap();
 
         attempt.start().unwrap();

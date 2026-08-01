@@ -76,6 +76,7 @@ mod tests {
     #[test]
     fn creates_task() {
         let execution_id = ExecutionId::new();
+
         let task = Task::new(execution_id);
 
         assert_eq!(task.status(), TaskStatus::Pending);
@@ -84,6 +85,7 @@ mod tests {
     #[test]
     fn pending_can_start() {
         let execution_id = ExecutionId::new();
+
         let mut task = Task::new(execution_id);
 
         task.start().unwrap();
@@ -94,6 +96,7 @@ mod tests {
     #[test]
     fn running_can_complete() {
         let execution_id = ExecutionId::new();
+
         let mut task = Task::new(execution_id);
 
         task.start().unwrap();
@@ -105,6 +108,7 @@ mod tests {
     #[test]
     fn running_can_fail() {
         let execution_id = ExecutionId::new();
+
         let mut task = Task::new(execution_id);
 
         task.start().unwrap();
@@ -116,6 +120,7 @@ mod tests {
     #[test]
     fn running_can_cancel() {
         let execution_id = ExecutionId::new();
+
         let mut task = Task::new(execution_id);
 
         task.start().unwrap();
@@ -127,6 +132,7 @@ mod tests {
     #[test]
     fn pending_cannot_complete() {
         let execution_id = ExecutionId::new();
+
         let mut task = Task::new(execution_id);
 
         assert!(task.complete().is_err());
@@ -135,6 +141,7 @@ mod tests {
     #[test]
     fn pending_cannot_fail() {
         let execution_id = ExecutionId::new();
+
         let mut task = Task::new(execution_id);
 
         assert!(task.fail().is_err());
@@ -143,6 +150,7 @@ mod tests {
     #[test]
     fn completed_cannot_restart() {
         let execution_id = ExecutionId::new();
+
         let mut task = Task::new(execution_id);
 
         task.start().unwrap();
@@ -154,6 +162,7 @@ mod tests {
     #[test]
     fn failed_cannot_restart() {
         let execution_id = ExecutionId::new();
+
         let mut task = Task::new(execution_id);
 
         task.start().unwrap();
@@ -165,6 +174,7 @@ mod tests {
     #[test]
     fn cancelled_cannot_restart() {
         let execution_id = ExecutionId::new();
+
         let mut task = Task::new(execution_id);
 
         task.start().unwrap();

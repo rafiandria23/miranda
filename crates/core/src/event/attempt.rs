@@ -37,7 +37,9 @@ mod tests {
     #[test]
     fn creates_attempt_started_event() {
         let task_id = TaskId::new();
+
         let attempt_id = AttemptId::new();
+
         let event = AttemptStarted {
             task_id,
             attempt_id,

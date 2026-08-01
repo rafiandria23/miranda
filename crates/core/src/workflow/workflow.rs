@@ -1,5 +1,6 @@
-use crate::error::DomainError;
 use crate::id::WorkflowId;
+
+use super::error::WorkflowError;
 
 pub struct Workflow {
     id: WorkflowId,
@@ -7,9 +8,9 @@ pub struct Workflow {
 }
 
 impl Workflow {
-    pub fn new(name: String) -> Result<Self, DomainError> {
+    pub fn new(name: String) -> Result<Self, WorkflowError> {
         if name.trim().is_empty() {
-            return Err(DomainError::EmptyWorkflowName);
+            return Err(WorkflowError::InvalidName);
         }
 
         Ok(Self {

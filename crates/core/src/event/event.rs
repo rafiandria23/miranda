@@ -37,6 +37,7 @@ mod tests {
     #[test]
     fn creates_event() {
         let execution_id = ExecutionId::new();
+
         let event = Event::new(execution_id, ExecutionStarted);
 
         assert_eq!(event.execution_id(), execution_id);

@@ -4,7 +4,7 @@ use super::AttemptStatus;
 
 #[derive(Debug, Error)]
 pub enum AttemptError {
-    #[error("attempt number must be greater than zero")]
+    #[error("attempt number is invalid")]
     InvalidNumber,
 
     #[error("invalid attempt transition from {from:?} to {to:?}")]

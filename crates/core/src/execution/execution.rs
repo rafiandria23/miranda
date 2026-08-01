@@ -81,6 +81,7 @@ mod tests {
     #[test]
     fn creates_execution() {
         let workflow_version_id = WorkflowVersionId::new();
+
         let execution = Execution::new(workflow_version_id);
 
         assert_eq!(execution.status(), ExecutionStatus::Pending);
@@ -89,6 +90,7 @@ mod tests {
     #[test]
     fn pending_can_start() {
         let workflow_version_id = WorkflowVersionId::new();
+
         let mut execution = Execution::new(workflow_version_id);
 
         execution.start().unwrap();
@@ -99,6 +101,7 @@ mod tests {
     #[test]
     fn running_can_complete() {
         let workflow_version_id = WorkflowVersionId::new();
+
         let mut execution = Execution::new(workflow_version_id);
 
         execution.start().unwrap();
@@ -110,6 +113,7 @@ mod tests {
     #[test]
     fn running_can_fail() {
         let workflow_version_id = WorkflowVersionId::new();
+
         let mut execution = Execution::new(workflow_version_id);
 
         execution.start().unwrap();
@@ -121,6 +125,7 @@ mod tests {
     #[test]
     fn running_can_cancel() {
         let workflow_version_id = WorkflowVersionId::new();
+
         let mut execution = Execution::new(workflow_version_id);
 
         execution.start().unwrap();
@@ -132,6 +137,7 @@ mod tests {
     #[test]
     fn running_can_terminate() {
         let workflow_version_id = WorkflowVersionId::new();
+
         let mut execution = Execution::new(workflow_version_id);
 
         execution.start().unwrap();
@@ -143,6 +149,7 @@ mod tests {
     #[test]
     fn pending_cannot_complete() {
         let workflow_version_id = WorkflowVersionId::new();
+
         let mut execution = Execution::new(workflow_version_id);
 
         assert!(execution.complete().is_err());
@@ -151,6 +158,7 @@ mod tests {
     #[test]
     fn pending_cannot_fail() {
         let workflow_version_id = WorkflowVersionId::new();
+
         let mut execution = Execution::new(workflow_version_id);
 
         assert!(execution.fail().is_err());
@@ -159,6 +167,7 @@ mod tests {
     #[test]
     fn completed_cannot_restart() {
         let workflow_version_id = WorkflowVersionId::new();
+
         let mut execution = Execution::new(workflow_version_id);
 
         execution.start().unwrap();
@@ -170,6 +179,7 @@ mod tests {
     #[test]
     fn failed_cannot_restart() {
         let workflow_version_id = WorkflowVersionId::new();
+
         let mut execution = Execution::new(workflow_version_id);
 
         execution.start().unwrap();
@@ -181,6 +191,7 @@ mod tests {
     #[test]
     fn cancelled_cannot_restart() {
         let workflow_version_id = WorkflowVersionId::new();
+
         let mut execution = Execution::new(workflow_version_id);
 
         execution.start().unwrap();
@@ -192,6 +203,7 @@ mod tests {
     #[test]
     fn terminated_cannot_restart() {
         let workflow_version_id = WorkflowVersionId::new();
+
         let mut execution = Execution::new(workflow_version_id);
 
         execution.start().unwrap();

@@ -1,5 +1,6 @@
-use crate::error::WorkflowVersionError;
 use crate::id::{WorkflowId, WorkflowVersionId};
+
+use super::error::WorkflowVersionError;
 
 pub struct WorkflowVersion {
     id: WorkflowVersionId,
@@ -40,6 +41,7 @@ mod tests {
     #[test]
     fn creates_workflow_version() {
         let workflow_id = WorkflowId::new();
+
         let workflow_version = WorkflowVersion::new(workflow_id, 3).unwrap();
 
         assert_eq!(workflow_version.version(), 3);
@@ -48,6 +50,7 @@ mod tests {
     #[test]
     fn rejects_zero_version() {
         let workflow_id = WorkflowId::new();
+
         let workflow_version = WorkflowVersion::new(workflow_id, 0);
 
         assert!(workflow_version.is_err());

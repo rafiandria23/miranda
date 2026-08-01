@@ -32,6 +32,7 @@ mod tests {
     #[test]
     fn creates_task_started_event() {
         let task_id = TaskId::new();
+
         let event = TaskStarted { task_id };
 
         assert_eq!(event.task_id, task_id);
