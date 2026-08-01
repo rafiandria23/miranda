@@ -76,7 +76,7 @@ mod tests {
     #[test]
     fn creates_task() {
         let execution_id = ExecutionId::new();
-        let mut task = Task::new(execution_id);
+        let task = Task::new(execution_id);
 
         assert_eq!(task.status(), TaskStatus::Pending);
     }

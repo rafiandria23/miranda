@@ -81,7 +81,7 @@ mod tests {
     #[test]
     fn creates_execution() {
         let workflow_version_id = WorkflowVersionId::new();
-        let mut execution = Execution::new(workflow_version_id);
+        let execution = Execution::new(workflow_version_id);
 
         assert_eq!(execution.status(), ExecutionStatus::Pending);
     }
