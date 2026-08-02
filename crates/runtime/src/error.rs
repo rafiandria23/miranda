@@ -1,4 +1,5 @@
 use miranda_core::{ExecutionError, id::WorkflowTaskId};
+use miranda_storage::StorageError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -23,4 +24,7 @@ pub enum RuntimeError {
 
     #[error("worker error: {0}")]
     Worker(String),
+
+    #[error(transparent)]
+    Storage(#[from] StorageError),
 }

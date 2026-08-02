@@ -3,6 +3,8 @@ use miranda_core::{
     definition::WorkflowDefinition,
     instance::{Execution, TaskStatus},
 };
+use miranda_storage::WorkflowStore;
+use std::sync::Arc;
 use tracing::{debug, instrument, warn};
 
 use crate::{RetryPolicy, RuntimeError, TaskExecutor, TaskResult};
@@ -10,15 +12,17 @@ use crate::{RetryPolicy, RuntimeError, TaskExecutor, TaskResult};
 use super::{scheduler, timer};
 
 #[derive(Debug)]
-pub struct Orchestrator<E: TaskExecutor> {
+pub struct Orchestrator<E: TaskExecutor, S: WorkflowStore> {
     executor: E,
+    store: Arc<S>,
     retry_policy: RetryPolicy,
 }
 
-impl<E: TaskExecutor> Orchestrator<E> {
-    pub fn new(executor: E) -> Self {
+impl<E: TaskExecutor, S: WorkflowStore> Orchestrator<E, S> {
+    pub fn new(executor: E, store: Arc<S>) -> Self {
         Self {
             executor,
+            store,
             retry_policy: RetryPolicy::default(),
         }
     }
@@ -29,13 +33,18 @@ impl<E: TaskExecutor> Orchestrator<E> {
         self
     }
 
-    #[instrument(skip(self, definition), fields(execution_id = ?execution.id()))]
+    #[instrument(skip(self, definition), fields(execution_id = %execution.id()))]
     pub async fn run(
         &self,
         mut execution: Execution,
         definition: &WorkflowDefinition,
     ) -> Result<Execution, RuntimeError> {
         execution.start()?;
+
+        let mut version = 1u64;
+
+        // 1. Initial state save to storage
+        self.store.save_execution(&execution).await?;
 
         loop {
             let ready = scheduler::next_ready(&execution, definition);
@@ -50,6 +59,10 @@ impl<E: TaskExecutor> Orchestrator<E> {
                 execution.start_task(*workflow_task_id, definition)?;
             }
 
+            // Persist state update after starting tasks
+            self.store.update_execution(&execution, version).await?;
+            version += 1;
+
             let futures = ready.iter().map(|workflow_task_id| {
                 let workflow_task = definition
                     .task(*workflow_task_id)
@@ -57,7 +70,6 @@ impl<E: TaskExecutor> Orchestrator<E> {
 
                 async move {
                     let result = self.executor.execute(workflow_task).await;
-
                     (*workflow_task_id, result)
                 }
             });
@@ -104,6 +116,10 @@ impl<E: TaskExecutor> Orchestrator<E> {
                     }
                 }
             }
+
+            // Persist state update after handling batch task results
+            self.store.update_execution(&execution, version).await?;
+            version += 1;
         }
 
         let any_failed = execution
@@ -116,6 +132,9 @@ impl<E: TaskExecutor> Orchestrator<E> {
         } else {
             execution.complete()?;
         }
+
+        // Final state persist upon completion/failure
+        self.store.update_execution(&execution, version).await?;
 
         Ok(execution)
     }
