@@ -1,14 +1,18 @@
-pub fn add(left: u64, right: u64) -> u64 {
-    left + right
-}
+pub mod error;
+pub mod traits;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+#[cfg(feature = "memory")]
+pub mod memory;
 
-    #[test]
-    fn it_works() {
-        let result = add(2, 2);
-        assert_eq!(result, 4);
-    }
-}
+#[cfg(feature = "postgres")]
+pub mod postgres;
+
+// Public re-exports for clean ergonomics
+pub use error::StorageError;
+pub use traits::WorkflowStore;
+
+#[cfg(feature = "memory")]
+pub use memory::MemoryStore;
+
+#[cfg(feature = "postgres")]
+pub use postgres::PostgresStore;
