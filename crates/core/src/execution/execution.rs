@@ -54,6 +54,7 @@ impl Execution {
     fn transition_to(&mut self, target: ExecutionStatus) -> Result<(), ExecutionError> {
         let valid = match (self.status, target) {
             (ExecutionStatus::Pending, ExecutionStatus::Running) => true,
+            (ExecutionStatus::Pending, ExecutionStatus::Cancelled) => true,
 
             (ExecutionStatus::Running, ExecutionStatus::Completed) => true,
             (ExecutionStatus::Running, ExecutionStatus::Failed) => true,
@@ -80,6 +81,14 @@ impl Execution {
     }
 
     pub fn complete(&mut self) -> Result<(), ExecutionError> {
+        if self
+            .tasks
+            .iter()
+            .any(|task| task.status() != TaskStatus::Completed)
+        {
+            return Err(ExecutionError::IncompleteTasks);
+        }
+
         self.transition_to(ExecutionStatus::Completed)
     }
 
@@ -88,6 +97,12 @@ impl Execution {
     }
 
     pub fn cancel(&mut self) -> Result<(), ExecutionError> {
+        for task in &mut self.tasks {
+            if matches!(task.status(), TaskStatus::Pending | TaskStatus::Running) {
+                task.cancel()?;
+            }
+        }
+
         self.transition_to(ExecutionStatus::Cancelled)
     }
 
@@ -135,6 +150,10 @@ impl Execution {
         workflow_task_id: WorkflowTaskId,
         definition: &WorkflowDefinition,
     ) -> Result<&mut Task, ExecutionError> {
+        if self.status != ExecutionStatus::Running {
+            return Err(ExecutionError::ExecutionNotRunning);
+        }
+
         let workflow_task = definition
             .tasks()
             .iter()

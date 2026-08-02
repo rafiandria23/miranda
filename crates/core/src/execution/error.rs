@@ -12,11 +12,17 @@ pub enum ExecutionError {
         to: ExecutionStatus,
     },
 
+    #[error("execution is not running")]
+    ExecutionNotRunning,
+
     #[error("workflow task {0:?} is not ready")]
     TaskNotReady(WorkflowTaskId),
 
     #[error("workflow task {0:?} does not exist in the execution")]
     UnknownTask(WorkflowTaskId),
+
+    #[error("execution cannot complete while tasks are incomplete")]
+    IncompleteTasks,
 
     #[error("task transition failed: {0}")]
     TaskTransition(#[from] TaskError),

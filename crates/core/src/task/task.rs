@@ -48,6 +48,7 @@ impl Task {
     fn transition_to(&mut self, target: TaskStatus) -> Result<(), TaskError> {
         let valid = match (self.status, target) {
             (TaskStatus::Pending, TaskStatus::Running) => true,
+            (TaskStatus::Pending, TaskStatus::Cancelled) => true,
 
             (TaskStatus::Running, TaskStatus::Completed) => true,
             (TaskStatus::Running, TaskStatus::Failed) => true,
