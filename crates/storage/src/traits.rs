@@ -1,26 +1,34 @@
 use miranda_core::{
     definition::WorkflowDefinition,
-    id::{ExecutionId, WorkflowId},
+    id::{ExecutionId, WorkflowId, WorkflowVersionId},
     instance::Execution,
 };
-use std::{future::Future, process::Output};
+use std::future::Future;
 
 use crate::error::StorageError;
 
 pub trait WorkflowStore: Send + Sync {
-    // Workflow Definition
+    // Workflow Definition (versioned)
+
     fn save_definition(
         &self,
-        id: WorkflowId,
+        workflow_id: WorkflowId,
+        version_id: WorkflowVersionId,
         definition: &WorkflowDefinition,
     ) -> impl Future<Output = Result<(), StorageError>> + Send;
 
+    fn get_versions(
+        &self,
+        workflow_id: WorkflowId,
+    ) -> impl Future<Output = Result<Vec<WorkflowVersionId>, StorageError>> + Send;
+
     fn get_definition(
         &self,
-        id: WorkflowId,
+        version_id: WorkflowVersionId,
     ) -> impl Future<Output = Result<WorkflowDefinition, StorageError>> + Send;
 
     // Execution State Management
+
     fn save_execution(
         &self,
         execution: &Execution,
@@ -34,7 +42,7 @@ pub trait WorkflowStore: Send + Sync {
 
     fn get_execution(
         &self,
-        id: ExecutionId,
+        execution_id: ExecutionId,
     ) -> impl Future<Output = Result<Execution, StorageError>> + Send;
 
     fn get_active_executions(

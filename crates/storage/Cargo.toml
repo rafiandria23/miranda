@@ -14,6 +14,7 @@ miranda-core = { path = "../core" }
 async-trait = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
+tokio = { workspace = true }
 tracing = { workspace = true }
 
 sqlx = { version = "0.9.0", features = [ "runtime-tokio", "tls-rustls", "postgres", "uuid", "json" ], optional = true }
