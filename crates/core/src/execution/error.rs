@@ -18,6 +18,9 @@ pub enum ExecutionError {
     #[error("workflow task {0:?} is not ready")]
     TaskNotReady(WorkflowTaskId),
 
+    #[error("workflow task {0:?} is not retryable")]
+    TaskNotRetryable(WorkflowTaskId),
+
     #[error("workflow task {0:?} does not exist in the workflow destination")]
     UnknownWorkflowTask(WorkflowTaskId),
 

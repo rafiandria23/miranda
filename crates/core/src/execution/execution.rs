@@ -218,6 +218,29 @@ impl Execution {
 
         Ok(task)
     }
+
+    pub fn retry_task(
+        &mut self,
+        workflow_task_id: WorkflowTaskId,
+    ) -> Result<&mut Task, ExecutionError> {
+        if self.status != ExecutionStatus::Running {
+            return Err(ExecutionError::ExecutionNotRunning);
+        }
+
+        let task = self
+            .tasks
+            .iter_mut()
+            .find(|task| task.workflow_task_id() == workflow_task_id)
+            .ok_or(ExecutionError::UnknownTask(workflow_task_id))?;
+
+        if task.status() != TaskStatus::Failed {
+            return Err(ExecutionError::TaskNotRetryable(workflow_task_id));
+        }
+
+        task.start()?;
+
+        Ok(task)
+    }
 }
 
 #[cfg(test)]
@@ -1005,5 +1028,166 @@ mod tests {
         let error = execution.cancel_task(workflow_task_id).unwrap_err();
 
         assert!(matches!(error, ExecutionError::UnknownTask(_)));
+    }
+
+    // -------------------------------------------------------------------------
+    // Task retry
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn failed_task_can_be_retried() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
+
+        execution.start_task(workflow_task_id, &definition).unwrap();
+        execution.fail_task(workflow_task_id).unwrap();
+
+        execution.retry_task(workflow_task_id).unwrap();
+
+        assert_eq!(execution.tasks()[0].status(), TaskStatus::Running);
+        assert_eq!(execution.tasks()[0].attempts().len(), 2);
+        assert_eq!(execution.tasks()[0].attempts()[0].number(), 1);
+        assert_eq!(execution.tasks()[0].attempts()[1].number(), 2);
+    }
+
+    #[test]
+    fn retried_task_is_ready_for_completion_again() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
+
+        execution.start_task(workflow_task_id, &definition).unwrap();
+        execution.fail_task(workflow_task_id).unwrap();
+        execution.retry_task(workflow_task_id).unwrap();
+        execution.complete_task(workflow_task_id).unwrap();
+
+        assert_eq!(execution.tasks()[0].status(), TaskStatus::Completed);
+        assert!(execution.complete().is_ok());
+    }
+
+    #[test]
+    fn pending_task_cannot_be_retried() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
+
+        let error = execution.retry_task(workflow_task_id).unwrap_err();
+
+        assert!(matches!(error, ExecutionError::TaskNotRetryable(_)));
+        assert_eq!(execution.tasks()[0].status(), TaskStatus::Pending);
+    }
+
+    #[test]
+    fn running_task_cannot_be_retried() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
+
+        execution.start_task(workflow_task_id, &definition).unwrap();
+
+        let error = execution.retry_task(workflow_task_id).unwrap_err();
+
+        assert!(matches!(error, ExecutionError::TaskNotRetryable(_)));
+    }
+
+    #[test]
+    fn completed_task_cannot_be_retried() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
+
+        execution.start_task(workflow_task_id, &definition).unwrap();
+        execution.complete_task(workflow_task_id).unwrap();
+
+        let error = execution.retry_task(workflow_task_id).unwrap_err();
+
+        assert!(matches!(error, ExecutionError::TaskNotRetryable(_)));
+    }
+
+    #[test]
+    fn cancelled_task_cannot_be_retried() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
+
+        execution.start_task(workflow_task_id, &definition).unwrap();
+        execution.cancel_task(workflow_task_id).unwrap();
+
+        let error = execution.retry_task(workflow_task_id).unwrap_err();
+
+        assert!(matches!(error, ExecutionError::TaskNotRetryable(_)));
+    }
+
+    #[test]
+    fn cannot_retry_unknown_runtime_task() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let mut execution = Execution::new(workflow_version_id);
+        execution.start().unwrap();
+
+        let error = execution.retry_task(workflow_task_id).unwrap_err();
+
+        assert!(matches!(error, ExecutionError::UnknownTask(_)));
+    }
+
+    #[test]
+    fn cannot_retry_task_when_execution_is_not_running() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+
+        let error = execution.retry_task(workflow_task_id).unwrap_err();
+
+        assert!(matches!(error, ExecutionError::ExecutionNotRunning));
     }
 }

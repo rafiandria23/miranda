@@ -54,6 +54,8 @@ impl Task {
             (TaskStatus::Running, TaskStatus::Failed) => true,
             (TaskStatus::Running, TaskStatus::Cancelled) => true,
 
+            (TaskStatus::Failed, TaskStatus::Running) => true,
+
             _ => false,
         };
 
@@ -70,7 +72,10 @@ impl Task {
     }
 
     pub fn start(&mut self) -> Result<(), TaskError> {
-        self.transition_to(TaskStatus::Running)
+        self.transition_to(TaskStatus::Running)?;
+        self.add_attempt()?;
+
+        Ok(())
     }
 
     pub fn complete(&mut self) -> Result<(), TaskError> {
@@ -223,7 +228,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_cannot_transition() {
+    fn failed_permits_only_restart() {
         let execution_id = ExecutionId::new();
         let workflow_task_id = WorkflowTaskId::new();
 
@@ -232,10 +237,12 @@ mod tests {
         task.start().unwrap();
         task.fail().unwrap();
 
-        assert!(task.start().is_err());
         assert!(task.complete().is_err());
         assert!(task.fail().is_err());
         assert!(task.cancel().is_err());
+
+        task.start().unwrap();
+        assert_eq!(task.status(), TaskStatus::Running);
     }
 
     #[test]
@@ -284,5 +291,53 @@ mod tests {
         assert_eq!(task.attempts().len(), 2);
         assert_eq!(task.attempts()[0].number(), 1);
         assert_eq!(task.attempts()[1].number(), 2);
+    }
+
+    // -------------------------------------------------------------------------
+    // Retry
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn failed_task_can_retry() {
+        let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let mut task = Task::new(execution_id, workflow_task_id);
+
+        task.start().unwrap();
+        task.fail().unwrap();
+        task.start().unwrap();
+
+        assert_eq!(task.status(), TaskStatus::Running);
+        assert_eq!(task.attempts().len(), 2);
+        assert_eq!(task.attempts()[0].number(), 1);
+        assert_eq!(task.attempts()[1].number(), 2);
+    }
+
+    #[test]
+    fn start_records_an_attempt() {
+        let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let mut task = Task::new(execution_id, workflow_task_id);
+
+        task.start().unwrap();
+
+        assert_eq!(task.attempts().len(), 1);
+        assert_eq!(task.attempts()[0].number(), 1);
+        assert_eq!(task.attempts()[0].status(), AttemptStatus::Pending);
+    }
+
+    #[test]
+    fn completed_cannot_retry() {
+        let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let mut task = Task::new(execution_id, workflow_task_id);
+
+        task.start().unwrap();
+        task.complete().unwrap();
+
+        assert!(task.start().is_err());
     }
 }
