@@ -917,6 +917,7 @@ name = "miranda-runtime"
 version = "0.1.0"
 dependencies = [
  "miranda-core",
+ "thiserror",
  "tokio",
  "tracing",
 ]
