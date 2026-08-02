@@ -36,4 +36,8 @@ pub trait WorkflowStore: Send + Sync {
         &self,
         id: ExecutionId,
     ) -> impl Future<Output = Result<Execution, StorageError>> + Send;
+
+    fn get_active_executions(
+        &self,
+    ) -> impl Future<Output = Result<Vec<Execution>, StorageError>> + Send;
 }

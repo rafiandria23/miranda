@@ -131,6 +131,23 @@ impl Task {
 
         Ok(self.attempts.last().expect("attempt was just appended"))
     }
+
+    // Resets a task currently in `Running` back to `Pending` state.
+    //
+    // This is used during crash recovery when an execution is hydrated after
+    // a worker process crash while tasks were still in-flight.
+    pub fn reset_to_pending(&mut self) -> Result<(), ExecutionError> {
+        if self.status != TaskStatus::Running {
+            return Err(ExecutionError::InvalidTaskTransition {
+                from: self.status,
+                to: TaskStatus::Pending,
+            });
+        }
+
+        self.status = TaskStatus::Pending;
+
+        Ok(())
+    }
 }
 
 #[cfg(test)]
@@ -208,5 +225,18 @@ mod tests {
                 to: TaskStatus::Completed,
             }
         ));
+    }
+
+    #[test]
+    fn running_can_reset_to_pending() {
+        let execution_id = ExecutionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let mut task = Task::new(execution_id, workflow_task_id);
+        task.start().unwrap();
+
+        assert_eq!(task.status(), TaskStatus::Running);
+        task.reset_to_pending().unwrap();
+        assert_eq!(task.status(), TaskStatus::Pending);
     }
 }

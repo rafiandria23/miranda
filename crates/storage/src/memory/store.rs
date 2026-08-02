@@ -97,4 +97,19 @@ impl WorkflowStore for MemoryStore {
             .map(|(execution, _)| execution.clone())
             .ok_or(StorageError::ExecutionNotFound(id))
     }
+
+    async fn get_active_executions(&self) -> Result<Vec<Execution>, StorageError> {
+        let executions = self
+            .executions
+            .read()
+            .map_err(|err| StorageError::Database(err.to_string()))?;
+
+        let active_executions = executions
+            .values()
+            .map(|(execution, _)| execution.clone())
+            .filter(|execution| execution.is_finished())
+            .collect();
+
+        Ok(active_executions)
+    }
 }

@@ -256,6 +256,48 @@ impl Execution {
 
         Ok(task)
     }
+
+    // Returns `true` if the execution has reached a terminal status.
+    pub fn is_finished(&self) -> bool {
+        matches!(
+            self.status,
+            ExecutionStatus::Completed
+                | ExecutionStatus::Failed
+                | ExecutionStatus::Cancelled
+                | ExecutionStatus::Terminated
+        )
+    }
+
+    // Resets any tasks left in `Running` state back to `Pending` so they can be
+    // rescheduled after worker node failover or orchestrator crash recovery.
+    pub fn recover_abandoned_tasks(
+        &mut self,
+        definition: &WorkflowDefinition,
+    ) -> Result<usize, ExecutionError> {
+        // Phase 1: Identify tasks in Running state whose dependencies are fulfilled
+        let tasks_to_recover: Vec<WorkflowTaskId> = self
+            .tasks
+            .iter()
+            .filter(|task| task.status() == TaskStatus::Running)
+            .filter_map(|task| {
+                definition
+                    .task(task.workflow_task_id())
+                    .filter(|workflow_task| self.are_task_dependencies_completed(workflow_task))
+                    .map(|workflow_task| workflow_task.id())
+            })
+            .collect();
+
+        let recovered_count = tasks_to_recover.len();
+
+        // Phase 2: Mutate the collected tasks back to Pending
+        for workflow_task_id in tasks_to_recover {
+            if let Some(task) = self.task_mut(workflow_task_id) {
+                task.reset_to_pending()?;
+            }
+        }
+
+        Ok(recovered_count)
+    }
 }
 
 #[cfg(test)]
@@ -385,5 +427,30 @@ mod tests {
 
         assert_eq!(execution.tasks()[0].status(), TaskStatus::Running);
         assert_eq!(execution.tasks()[0].attempts().len(), 2);
+    }
+
+    #[test]
+    fn recovers_abandoned_running_tasks() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "process_chunk".to_owned(), vec![]).unwrap();
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
+
+        // Task starts running on worker
+        execution.start_task(workflow_task_id, &definition).unwrap();
+        assert_eq!(execution.tasks()[0].status(), TaskStatus::Running);
+
+        // Process crashes, recovery service runs:
+        let recovered = execution.recover_abandoned_tasks(&definition).unwrap();
+
+        assert_eq!(recovered, 1);
+        assert_eq!(execution.tasks()[0].status(), TaskStatus::Pending);
+        // Task is immediately available for ready_tasks scheduling again
+        assert_eq!(execution.ready_tasks(&definition), vec![workflow_task_id]);
     }
 }
