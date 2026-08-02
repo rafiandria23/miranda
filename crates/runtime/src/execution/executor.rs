@@ -1,13 +1,7 @@
+use miranda_core::definition::WorkflowTask;
 use std::future::Future;
 
-use miranda_core::WorkflowTask;
-
-use super::ExecutorError;
-
-pub enum TaskResult {
-    Success,
-    Failure(ExecutorError),
-}
+use super::TaskResult;
 
 pub trait TaskExecutor {
     fn execute(&self, task: &WorkflowTask) -> impl Future<Output = TaskResult>;

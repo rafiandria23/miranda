@@ -1,25 +1,26 @@
-use miranda_core::ExecutionError;
+use miranda_core::{ExecutionError, id::WorkflowTaskId};
 use thiserror::Error;
-
-use crate::{ExecutorError, RetryError, SchedulerError, TimerError, WorkerError};
 
 #[derive(Debug, Error)]
 pub enum RuntimeError {
     #[error(transparent)]
     Domain(#[from] ExecutionError),
 
-    #[error(transparent)]
-    Executor(#[from] ExecutorError),
+    #[error("task execution failed: {0}")]
+    ExecutionFailed(String),
 
-    #[error(transparent)]
-    Scheduler(#[from] SchedulerError),
+    #[error("max retry attempts ({max_attempts}) reached for task '{task_id}'")]
+    MaxAttemptsReached {
+        task_id: WorkflowTaskId,
+        max_attempts: u32,
+    },
 
-    #[error(transparent)]
-    Retry(#[from] RetryError),
+    #[error("scheduler error: {0}")]
+    Scheduler(String),
 
-    #[error(transparent)]
-    Timer(#[from] TimerError),
+    #[error("timer error: {0}")]
+    Timer(String),
 
-    #[error(transparent)]
-    Worker(#[from] WorkerError),
+    #[error("worker error: {0}")]
+    Worker(String),
 }
