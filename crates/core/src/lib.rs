@@ -1,15 +1,7 @@
-mod attempt;
-mod execution;
-mod task;
-mod workflow;
-
-pub mod event;
+pub mod definition;
+pub mod error;
 pub mod id;
+pub mod instance;
 
-pub use attempt::{Attempt, AttemptError, AttemptStatus};
-pub use execution::{Execution, ExecutionError, ExecutionStatus};
-pub use task::{Task, TaskError, TaskStatus};
-pub use workflow::{
-    Workflow, WorkflowDefinition, WorkflowDefinitionError, WorkflowError, WorkflowTask,
-    WorkflowTaskError, WorkflowVersion, WorkflowVersionError,
-};
+// Re-export root errors for convenience
+pub use error::ExecutionError;

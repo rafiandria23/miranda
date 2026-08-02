@@ -1,10 +1,10 @@
+use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
 
+use crate::error::ExecutionError;
 use crate::id::WorkflowTaskId;
 
-use super::WorkflowTaskError;
-
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowTask {
     id: WorkflowTaskId,
     task_type: String,
@@ -16,7 +16,7 @@ impl WorkflowTask {
         id: WorkflowTaskId,
         task_type: String,
         dependencies: Vec<WorkflowTaskId>,
-    ) -> Result<Self, WorkflowTaskError> {
+    ) -> Result<Self, ExecutionError> {
         let task = Self {
             id,
             task_type,
@@ -24,7 +24,6 @@ impl WorkflowTask {
         };
 
         task.validate()?;
-
         Ok(task)
     }
 
@@ -40,31 +39,29 @@ impl WorkflowTask {
         &self.dependencies
     }
 
-    pub fn validate(&self) -> Result<(), WorkflowTaskError> {
+    pub fn validate(&self) -> Result<(), ExecutionError> {
         self.validate_task_type()?;
         self.validate_dependencies()?;
-
         Ok(())
     }
 
-    fn validate_task_type(&self) -> Result<(), WorkflowTaskError> {
+    fn validate_task_type(&self) -> Result<(), ExecutionError> {
         if self.task_type.trim().is_empty() {
-            return Err(WorkflowTaskError::InvalidTaskType);
+            return Err(ExecutionError::InvalidTaskType);
         }
-
         Ok(())
     }
 
-    fn validate_dependencies(&self) -> Result<(), WorkflowTaskError> {
+    fn validate_dependencies(&self) -> Result<(), ExecutionError> {
         let mut dependencies = HashSet::new();
 
         for dependency in &self.dependencies {
             if *dependency == self.id {
-                return Err(WorkflowTaskError::SelfDependency);
+                return Err(ExecutionError::SelfDependency(self.id));
             }
 
             if !dependencies.insert(*dependency) {
-                return Err(WorkflowTaskError::DuplicateDependency);
+                return Err(ExecutionError::DuplicateDependency(*dependency));
             }
         }
 
@@ -79,7 +76,6 @@ mod tests {
     #[test]
     fn creates_workflow_task() {
         let task_id = WorkflowTaskId::new();
-
         let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
 
         assert_eq!(task.id(), task_id);
@@ -90,7 +86,6 @@ mod tests {
     #[test]
     fn creates_workflow_task_with_dependencies() {
         let dependency_id = WorkflowTaskId::new();
-
         let task = WorkflowTask::new(
             WorkflowTaskId::new(),
             "send_email".to_owned(),
@@ -104,36 +99,35 @@ mod tests {
     #[test]
     fn rejects_empty_task_type() {
         let task = WorkflowTask::new(WorkflowTaskId::new(), "".to_owned(), vec![]);
-
-        assert!(matches!(task, Err(WorkflowTaskError::InvalidTaskType)));
+        assert!(matches!(task, Err(ExecutionError::InvalidTaskType)));
     }
 
     #[test]
     fn rejects_whitespace_task_type() {
         let task = WorkflowTask::new(WorkflowTaskId::new(), "   ".to_owned(), vec![]);
-
-        assert!(matches!(task, Err(WorkflowTaskError::InvalidTaskType)));
+        assert!(matches!(task, Err(ExecutionError::InvalidTaskType)));
     }
 
     #[test]
     fn rejects_duplicate_dependency() {
         let dependency_id = WorkflowTaskId::new();
-
         let task = WorkflowTask::new(
             WorkflowTaskId::new(),
             "send_email".to_owned(),
             vec![dependency_id, dependency_id],
         );
 
-        assert!(matches!(task, Err(WorkflowTaskError::DuplicateDependency)));
+        assert_eq!(
+            task,
+            Err(ExecutionError::DuplicateDependency(dependency_id))
+        );
     }
 
     #[test]
     fn rejects_self_dependency() {
         let task_id = WorkflowTaskId::new();
-
         let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![task_id]);
 
-        assert!(matches!(task, Err(WorkflowTaskError::SelfDependency)));
+        assert_eq!(task, Err(ExecutionError::SelfDependency(task_id)));
     }
 }

@@ -1,20 +1,20 @@
+use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
+use crate::error::ExecutionError;
 use crate::id::WorkflowTaskId;
 
-use super::{WorkflowDefinitionError, WorkflowTask};
+use super::WorkflowTask;
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowDefinition {
     tasks: Vec<WorkflowTask>,
 }
 
 impl WorkflowDefinition {
-    pub fn new(tasks: Vec<WorkflowTask>) -> Result<Self, WorkflowDefinitionError> {
+    pub fn new(tasks: Vec<WorkflowTask>) -> Result<Self, ExecutionError> {
         let definition = Self { tasks };
-
         definition.validate()?;
-
         Ok(definition)
     }
 
@@ -26,33 +26,32 @@ impl WorkflowDefinition {
         self.tasks.iter().find(|task| task.id() == task_id)
     }
 
-    pub fn validate(&self) -> Result<(), WorkflowDefinitionError> {
+    pub fn validate(&self) -> Result<(), ExecutionError> {
         self.validate_task_ids()?;
         self.validate_task_dependencies()?;
         self.validate_task_dependency_cycles()?;
-
         Ok(())
     }
 
-    fn validate_task_ids(&self) -> Result<(), WorkflowDefinitionError> {
+    fn validate_task_ids(&self) -> Result<(), ExecutionError> {
         let mut task_ids = HashSet::new();
 
         for task in &self.tasks {
             if !task_ids.insert(task.id()) {
-                return Err(WorkflowDefinitionError::DuplicateTaskId);
+                return Err(ExecutionError::DuplicateTaskId(task.id()));
             }
         }
 
         Ok(())
     }
 
-    fn validate_task_dependencies(&self) -> Result<(), WorkflowDefinitionError> {
+    fn validate_task_dependencies(&self) -> Result<(), ExecutionError> {
         let task_ids: HashSet<_> = self.tasks.iter().map(|task| task.id()).collect();
 
         for task in &self.tasks {
             for dependency in task.dependencies() {
                 if !task_ids.contains(dependency) {
-                    return Err(WorkflowDefinitionError::UnknownDependency);
+                    return Err(ExecutionError::UnknownDependency);
                 }
             }
         }
@@ -60,7 +59,7 @@ impl WorkflowDefinition {
         Ok(())
     }
 
-    fn validate_task_dependency_cycles(&self) -> Result<(), WorkflowDefinitionError> {
+    fn validate_task_dependency_cycles(&self) -> Result<(), ExecutionError> {
         let tasks: HashMap<_, _> = self.tasks.iter().map(|task| (task.id(), task)).collect();
 
         let mut visiting = HashSet::new();
@@ -75,15 +74,14 @@ impl WorkflowDefinition {
         Ok(())
     }
 
-    // DFS helper for validating task dependency cycles.
     fn check_task_dependency_cycle(
         task_id: WorkflowTaskId,
         tasks: &HashMap<WorkflowTaskId, &WorkflowTask>,
         visiting: &mut HashSet<WorkflowTaskId>,
         visited: &mut HashSet<WorkflowTaskId>,
-    ) -> Result<(), WorkflowDefinitionError> {
+    ) -> Result<(), ExecutionError> {
         if visiting.contains(&task_id) {
-            return Err(WorkflowDefinitionError::CyclicDependency);
+            return Err(ExecutionError::CyclicDependency);
         }
 
         if visited.contains(&task_id) {
@@ -117,14 +115,12 @@ mod tests {
             WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![task]).unwrap();
-
         assert_eq!(definition.tasks().len(), 1);
     }
 
     #[test]
     fn creates_empty_workflow_definition() {
         let definition = WorkflowDefinition::new(vec![]).unwrap();
-
         assert!(definition.tasks().is_empty());
     }
 
@@ -138,7 +134,6 @@ mod tests {
             WorkflowTask::new(task_id, "send_email".to_owned(), vec![dependency_id]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![dependency, task]).unwrap();
-
         assert_eq!(definition.tasks().len(), 2);
         assert!(definition.validate().is_ok());
     }
@@ -146,11 +141,9 @@ mod tests {
     #[test]
     fn finds_task_by_id() {
         let task_id = WorkflowTaskId::new();
-
         let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![task]).unwrap();
-
         let found = definition.task(task_id).unwrap();
 
         assert_eq!(found.id(), task_id);
@@ -162,7 +155,6 @@ mod tests {
         let unknown_task_id = WorkflowTaskId::new();
 
         let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
-
         let definition = WorkflowDefinition::new(vec![task]).unwrap();
 
         assert!(definition.task(unknown_task_id).is_none());
@@ -176,11 +168,7 @@ mod tests {
         let second_task = WorkflowTask::new(task_id, "send_sms".to_owned(), vec![]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![first_task, second_task]);
-
-        assert!(matches!(
-            definition,
-            Err(WorkflowDefinitionError::DuplicateTaskId)
-        ));
+        assert_eq!(definition, Err(ExecutionError::DuplicateTaskId(task_id)));
     }
 
     #[test]
@@ -195,11 +183,7 @@ mod tests {
         .unwrap();
 
         let definition = WorkflowDefinition::new(vec![task]);
-
-        assert!(matches!(
-            definition,
-            Err(WorkflowDefinitionError::UnknownDependency)
-        ));
+        assert!(matches!(definition, Err(ExecutionError::UnknownDependency)));
     }
 
     #[test]
@@ -214,11 +198,7 @@ mod tests {
             WorkflowTask::new(second_task_id, "send_sms".to_owned(), vec![first_task_id]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![first_task, second_task]);
-
-        assert!(matches!(
-            definition,
-            Err(WorkflowDefinitionError::CyclicDependency)
-        ));
+        assert!(matches!(definition, Err(ExecutionError::CyclicDependency)));
     }
 
     #[test]
@@ -236,10 +216,6 @@ mod tests {
             WorkflowTask::new(third_task_id, "send_mms".to_owned(), vec![first_task_id]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![first_task, second_task, third_task]);
-
-        assert!(matches!(
-            definition,
-            Err(WorkflowDefinitionError::CyclicDependency)
-        ));
+        assert!(matches!(definition, Err(ExecutionError::CyclicDependency)));
     }
 }

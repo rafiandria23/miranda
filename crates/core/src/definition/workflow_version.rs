@@ -1,7 +1,11 @@
+use serde::{Deserialize, Serialize};
+
+use crate::error::ExecutionError;
 use crate::id::{WorkflowId, WorkflowVersionId};
 
-use super::{WorkflowDefinition, WorkflowVersionError};
+use super::WorkflowDefinition;
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowVersion {
     id: WorkflowVersionId,
     workflow_id: WorkflowId,
@@ -14,7 +18,7 @@ impl WorkflowVersion {
         workflow_id: WorkflowId,
         version: u32,
         definition: WorkflowDefinition,
-    ) -> Result<Self, WorkflowVersionError> {
+    ) -> Result<Self, ExecutionError> {
         let workflow_version = Self {
             id: WorkflowVersionId::new(),
             workflow_id,
@@ -23,7 +27,6 @@ impl WorkflowVersion {
         };
 
         workflow_version.validate()?;
-
         Ok(workflow_version)
     }
 
@@ -43,36 +46,32 @@ impl WorkflowVersion {
         &self.definition
     }
 
-    pub fn validate(&self) -> Result<(), WorkflowVersionError> {
+    pub fn validate(&self) -> Result<(), ExecutionError> {
         self.validate_version()?;
-
         Ok(())
     }
 
-    fn validate_version(&self) -> Result<(), WorkflowVersionError> {
+    fn validate_version(&self) -> Result<(), ExecutionError> {
         if self.version == 0 {
-            return Err(WorkflowVersionError::InvalidVersion);
+            return Err(ExecutionError::InvalidWorkflowVersion);
         }
-
         Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::{WorkflowTask, id::WorkflowTaskId};
-
     use super::*;
+    use crate::definition::WorkflowTask;
+    use crate::id::WorkflowTaskId;
 
     #[test]
     fn creates_workflow_version() {
         let workflow_id = WorkflowId::new();
-
         let task =
             WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![]).unwrap();
 
         let definition = WorkflowDefinition::new(vec![task]).unwrap();
-
         let version = WorkflowVersion::new(workflow_id, 3, definition).unwrap();
 
         assert_eq!(version.workflow_id(), workflow_id);
@@ -84,14 +83,12 @@ mod tests {
     #[test]
     fn rejects_zero_version() {
         let workflow_id = WorkflowId::new();
-
         let definition = WorkflowDefinition::new(vec![]).unwrap();
-
         let version = WorkflowVersion::new(workflow_id, 0, definition);
 
         assert!(matches!(
             version,
-            Err(WorkflowVersionError::InvalidVersion)
+            Err(ExecutionError::InvalidWorkflowVersion)
         ));
     }
 }
