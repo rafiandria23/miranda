@@ -155,10 +155,8 @@ impl Execution {
         }
 
         let workflow_task = definition
-            .tasks()
-            .iter()
-            .find(|workflow_task| workflow_task.id() == workflow_task_id)
-            .ok_or(ExecutionError::TaskNotReady(workflow_task_id))?;
+            .task(workflow_task_id)
+            .ok_or(ExecutionError::UnknownWorkflowTask(workflow_task_id))?;
 
         if !self.is_task_ready(workflow_task) {
             return Err(ExecutionError::TaskNotReady(workflow_task_id));
@@ -168,7 +166,7 @@ impl Execution {
             .tasks
             .iter_mut()
             .find(|task| task.workflow_task_id() == workflow_task_id)
-            .ok_or(ExecutionError::TaskNotReady(workflow_task_id))?;
+            .ok_or(ExecutionError::UnknownTask(workflow_task_id))?;
 
         task.start()?;
 
@@ -320,9 +318,7 @@ mod tests {
         ])
         .unwrap();
 
-        execution
-            .start_task(running_task_id, &definition)
-            .unwrap();
+        execution.start_task(running_task_id, &definition).unwrap();
 
         execution.cancel().unwrap();
 
@@ -743,7 +739,7 @@ mod tests {
     }
 
     #[test]
-    fn cannot_start_unknown_runtime_task() {
+    fn cannot_start_task_with_no_matching_runtime_task() {
         let workflow_version_id = WorkflowVersionId::new();
         let workflow_task_id = WorkflowTaskId::new();
 
@@ -760,6 +756,30 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, ExecutionError::TaskNotReady(_)));
+    }
+
+    #[test]
+    fn cannot_start_task_unknown_to_workflow_definition() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+        let unknown_workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
+
+        let error = execution
+            .start_task(unknown_workflow_task_id, &definition)
+            .unwrap_err();
+
+        assert!(matches!(
+            error,
+            ExecutionError::UnknownWorkflowTask(id) if id == unknown_workflow_task_id
+        ));
     }
 
     // -------------------------------------------------------------------------

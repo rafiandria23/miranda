@@ -21,6 +21,10 @@ impl WorkflowDefinition {
         &self.tasks
     }
 
+    pub fn task(&self, task_id: WorkflowTaskId) -> Option<&WorkflowTask> {
+        self.tasks.iter().find(|task| task.id() == task_id)
+    }
+
     pub fn validate(&self) -> Result<(), WorkflowDefinitionError> {
         self.validate_task_ids()?;
         self.validate_task_dependencies()?;
@@ -128,8 +132,7 @@ mod tests {
         let dependency_id = WorkflowTaskId::new();
         let task_id = WorkflowTaskId::new();
 
-        let dependency =
-            WorkflowTask::new(dependency_id, "validate".to_owned(), vec![]).unwrap();
+        let dependency = WorkflowTask::new(dependency_id, "validate".to_owned(), vec![]).unwrap();
         let task =
             WorkflowTask::new(task_id, "send_email".to_owned(), vec![dependency_id]).unwrap();
 
@@ -137,6 +140,31 @@ mod tests {
 
         assert_eq!(definition.tasks().len(), 2);
         assert!(definition.validate().is_ok());
+    }
+
+    #[test]
+    fn finds_task_by_id() {
+        let task_id = WorkflowTaskId::new();
+
+        let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![task]).unwrap();
+
+        let found = definition.task(task_id).unwrap();
+
+        assert_eq!(found.id(), task_id);
+    }
+
+    #[test]
+    fn does_not_find_unknown_task_id() {
+        let task_id = WorkflowTaskId::new();
+        let unknown_task_id = WorkflowTaskId::new();
+
+        let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![task]).unwrap();
+
+        assert!(definition.task(unknown_task_id).is_none());
     }
 
     #[test]
