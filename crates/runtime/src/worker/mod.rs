@@ -3,7 +3,7 @@ mod heartbeat;
 mod lease;
 mod registration;
 
-pub use client::*;
-pub use heartbeat::*;
-pub use lease::*;
-pub use registration::*;
+pub use client::WorkerClient;
+pub use heartbeat::HeartbeatRunner;
+pub use lease::TaskLease;
+pub use registration::{WorkerNode, WorkerStatus};
