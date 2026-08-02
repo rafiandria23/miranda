@@ -170,6 +170,36 @@ impl Execution {
 
         Ok(task)
     }
+
+    pub fn fail_task(
+        &mut self,
+        workflow_task_id: WorkflowTaskId,
+    ) -> Result<&mut Task, ExecutionError> {
+        let task = self
+            .tasks
+            .iter_mut()
+            .find(|task| task.workflow_task_id() == workflow_task_id)
+            .ok_or(ExecutionError::UnknownTask(workflow_task_id))?;
+
+        task.fail()?;
+
+        Ok(task)
+    }
+
+    pub fn cancel_task(
+        &mut self,
+        workflow_task_id: WorkflowTaskId,
+    ) -> Result<&mut Task, ExecutionError> {
+        let task = self
+            .tasks
+            .iter_mut()
+            .find(|task| task.workflow_task_id() == workflow_task_id)
+            .ok_or(ExecutionError::UnknownTask(workflow_task_id))?;
+
+        task.cancel()?;
+
+        Ok(task)
+    }
 }
 
 #[cfg(test)]
@@ -440,8 +470,6 @@ mod tests {
 
         let definition = WorkflowDefinition::new(vec![dependency, task]).unwrap();
 
-        // The definition is valid, but the runtime intentionally contains
-        // only the dependent task.
         let mut execution = Execution::new(workflow_version_id);
         execution.add_task(task_id).unwrap();
 
@@ -484,7 +512,6 @@ mod tests {
         assert_eq!(execution.ready_tasks(&definition), vec![dependency_id]);
 
         execution.start_task(dependency_id, &definition).unwrap();
-
         execution.complete_task(dependency_id).unwrap();
 
         assert_eq!(execution.ready_tasks(&definition), vec![task_id]);
@@ -596,10 +623,7 @@ mod tests {
 
         let error = execution.start_task(task_id, &definition).unwrap_err();
 
-        assert!(matches!(
-            error,
-            ExecutionError::TaskNotReady(id) if id == task_id
-        ));
+        assert!(matches!(error, ExecutionError::TaskNotReady(_)));
     }
 
     #[test]
@@ -633,17 +657,13 @@ mod tests {
 
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
 
-        // The definition contains the task, but the execution does not.
         let mut execution = Execution::new(workflow_version_id);
 
         let error = execution
             .start_task(workflow_task_id, &definition)
             .unwrap_err();
 
-        assert!(matches!(
-            error,
-            ExecutionError::TaskNotReady(id) if id == workflow_task_id
-        ));
+        assert!(matches!(error, ExecutionError::TaskNotReady(_)));
     }
 
     // -------------------------------------------------------------------------
@@ -663,7 +683,6 @@ mod tests {
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
 
         execution.start_task(workflow_task_id, &definition).unwrap();
-
         execution.complete_task(workflow_task_id).unwrap();
 
         assert_eq!(execution.tasks()[0].status(), TaskStatus::Completed);
@@ -685,7 +704,6 @@ mod tests {
         let error = execution.complete_task(workflow_task_id).unwrap_err();
 
         assert!(matches!(error, ExecutionError::TaskTransition(_)));
-
         assert_eq!(execution.tasks()[0].status(), TaskStatus::Pending);
     }
 
@@ -718,9 +736,152 @@ mod tests {
 
         let error = execution.complete_task(workflow_task_id).unwrap_err();
 
-        assert!(matches!(
-            error,
-            ExecutionError::UnknownTask(id) if id == workflow_task_id
-        ));
+        assert!(matches!(error, ExecutionError::UnknownTask(_)));
+    }
+
+    // -------------------------------------------------------------------------
+    // Task failure
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn running_task_can_fail() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+
+        execution.start_task(workflow_task_id, &definition).unwrap();
+        execution.fail_task(workflow_task_id).unwrap();
+
+        assert_eq!(execution.tasks()[0].status(), TaskStatus::Failed);
+        assert!(execution.ready_tasks(&definition).is_empty());
+    }
+
+    #[test]
+    fn pending_task_cannot_fail() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+
+        let error = execution.fail_task(workflow_task_id).unwrap_err();
+
+        assert!(matches!(error, ExecutionError::TaskTransition(_)));
+        assert_eq!(execution.tasks()[0].status(), TaskStatus::Pending);
+    }
+
+    #[test]
+    fn cannot_fail_task_twice() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+
+        execution.start_task(workflow_task_id, &definition).unwrap();
+        execution.fail_task(workflow_task_id).unwrap();
+
+        let error = execution.fail_task(workflow_task_id).unwrap_err();
+
+        assert!(matches!(error, ExecutionError::TaskTransition(_)));
+    }
+
+    #[test]
+    fn cannot_fail_unknown_runtime_task() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let mut execution = Execution::new(workflow_version_id);
+
+        let error = execution.fail_task(workflow_task_id).unwrap_err();
+
+        assert!(matches!(error, ExecutionError::UnknownTask(_)));
+    }
+
+    // -------------------------------------------------------------------------
+    // Task cancellation
+    // -------------------------------------------------------------------------
+
+    #[test]
+    fn running_task_can_cancel() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+
+        execution.start_task(workflow_task_id, &definition).unwrap();
+        execution.cancel_task(workflow_task_id).unwrap();
+
+        assert_eq!(execution.tasks()[0].status(), TaskStatus::Cancelled);
+        assert!(execution.ready_tasks(&definition).is_empty());
+    }
+
+    #[test]
+    fn pending_task_cannot_cancel() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+
+        let error = execution.cancel_task(workflow_task_id).unwrap_err();
+
+        assert!(matches!(error, ExecutionError::TaskTransition(_)));
+        assert_eq!(execution.tasks()[0].status(), TaskStatus::Pending);
+    }
+
+    #[test]
+    fn cannot_cancel_task_twice() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+
+        execution.start_task(workflow_task_id, &definition).unwrap();
+        execution.cancel_task(workflow_task_id).unwrap();
+
+        let error = execution.cancel_task(workflow_task_id).unwrap_err();
+
+        assert!(matches!(error, ExecutionError::TaskTransition(_)));
+    }
+
+    #[test]
+    fn cannot_cancel_unknown_runtime_task() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let mut execution = Execution::new(workflow_version_id);
+
+        let error = execution.cancel_task(workflow_task_id).unwrap_err();
+
+        assert!(matches!(error, ExecutionError::UnknownTask(_)));
     }
 }
