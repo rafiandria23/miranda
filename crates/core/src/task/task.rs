@@ -112,6 +112,7 @@ mod tests {
         assert_eq!(task.workflow_task_id(), workflow_task_id);
         assert_eq!(task.status(), TaskStatus::Pending);
         assert!(task.attempts().is_empty());
+        assert_ne!(task.id(), TaskId::new());
     }
 
     #[test]
@@ -172,7 +173,15 @@ mod tests {
 
         let mut task = Task::new(execution_id, workflow_task_id);
 
-        assert!(task.complete().is_err());
+        let err = task.complete().unwrap_err();
+
+        assert!(matches!(
+            err,
+            TaskError::InvalidTransition {
+                from: TaskStatus::Pending,
+                to: TaskStatus::Completed,
+            }
+        ));
     }
 
     #[test]
@@ -186,13 +195,15 @@ mod tests {
     }
 
     #[test]
-    fn pending_cannot_cancel() {
+    fn pending_can_cancel() {
         let execution_id = ExecutionId::new();
         let workflow_task_id = WorkflowTaskId::new();
 
         let mut task = Task::new(execution_id, workflow_task_id);
 
-        assert!(task.cancel().is_err());
+        task.cancel().unwrap();
+
+        assert_eq!(task.status(), TaskStatus::Cancelled);
     }
 
     #[test]

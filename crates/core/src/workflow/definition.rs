@@ -117,6 +117,29 @@ mod tests {
     }
 
     #[test]
+    fn creates_empty_workflow_definition() {
+        let definition = WorkflowDefinition::new(vec![]).unwrap();
+
+        assert!(definition.tasks().is_empty());
+    }
+
+    #[test]
+    fn creates_workflow_definition_with_dependencies() {
+        let dependency_id = WorkflowTaskId::new();
+        let task_id = WorkflowTaskId::new();
+
+        let dependency =
+            WorkflowTask::new(dependency_id, "validate".to_owned(), vec![]).unwrap();
+        let task =
+            WorkflowTask::new(task_id, "send_email".to_owned(), vec![dependency_id]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![dependency, task]).unwrap();
+
+        assert_eq!(definition.tasks().len(), 2);
+        assert!(definition.validate().is_ok());
+    }
+
+    #[test]
     fn rejects_duplicate_task_id() {
         let task_id = WorkflowTaskId::new();
 
@@ -125,7 +148,10 @@ mod tests {
 
         let definition = WorkflowDefinition::new(vec![first_task, second_task]);
 
-        assert!(definition.is_err());
+        assert!(matches!(
+            definition,
+            Err(WorkflowDefinitionError::DuplicateTaskId)
+        ));
     }
 
     #[test]
@@ -141,7 +167,10 @@ mod tests {
 
         let definition = WorkflowDefinition::new(vec![task]);
 
-        assert!(definition.is_err());
+        assert!(matches!(
+            definition,
+            Err(WorkflowDefinitionError::UnknownDependency)
+        ));
     }
 
     #[test]
@@ -157,7 +186,10 @@ mod tests {
 
         let definition = WorkflowDefinition::new(vec![first_task, second_task]);
 
-        assert!(definition.is_err());
+        assert!(matches!(
+            definition,
+            Err(WorkflowDefinitionError::CyclicDependency)
+        ));
     }
 
     #[test]
@@ -176,6 +208,9 @@ mod tests {
 
         let definition = WorkflowDefinition::new(vec![first_task, second_task, third_task]);
 
-        assert!(definition.is_err());
+        assert!(matches!(
+            definition,
+            Err(WorkflowDefinitionError::CyclicDependency)
+        ));
     }
 }

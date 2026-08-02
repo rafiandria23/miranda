@@ -107,6 +107,7 @@ mod tests {
         assert_eq!(attempt.task_id(), task_id);
         assert_eq!(attempt.number(), 3);
         assert_eq!(attempt.status(), AttemptStatus::Pending);
+        assert_ne!(attempt.id(), AttemptId::new());
     }
 
     #[test]
@@ -115,7 +116,7 @@ mod tests {
 
         let attempt = Attempt::new(task_id, 0);
 
-        assert!(attempt.is_err());
+        assert!(matches!(attempt, Err(AttemptError::InvalidNumber)));
     }
 
     #[test]
@@ -180,7 +181,15 @@ mod tests {
 
         let mut attempt = Attempt::new(task_id, 3).unwrap();
 
-        assert!(attempt.succeed().is_err());
+        let err = attempt.succeed().unwrap_err();
+
+        assert!(matches!(
+            err,
+            AttemptError::InvalidTransition {
+                from: AttemptStatus::Pending,
+                to: AttemptStatus::Succeeded,
+            }
+        ));
     }
 
     #[test]

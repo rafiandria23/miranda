@@ -77,17 +77,41 @@ mod tests {
 
     #[test]
     fn creates_workflow_task() {
-        let task =
-            WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![]).unwrap();
+        let task_id = WorkflowTaskId::new();
 
+        let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        assert_eq!(task.id(), task_id);
         assert_eq!(task.task_type(), "send_email");
+        assert!(task.dependencies().is_empty());
+    }
+
+    #[test]
+    fn creates_workflow_task_with_dependencies() {
+        let dependency_id = WorkflowTaskId::new();
+
+        let task = WorkflowTask::new(
+            WorkflowTaskId::new(),
+            "send_email".to_owned(),
+            vec![dependency_id],
+        )
+        .unwrap();
+
+        assert_eq!(task.dependencies(), [dependency_id]);
     }
 
     #[test]
     fn rejects_empty_task_type() {
         let task = WorkflowTask::new(WorkflowTaskId::new(), "".to_owned(), vec![]);
 
-        assert!(task.is_err());
+        assert!(matches!(task, Err(WorkflowTaskError::InvalidTaskType)));
+    }
+
+    #[test]
+    fn rejects_whitespace_task_type() {
+        let task = WorkflowTask::new(WorkflowTaskId::new(), "   ".to_owned(), vec![]);
+
+        assert!(matches!(task, Err(WorkflowTaskError::InvalidTaskType)));
     }
 
     #[test]
@@ -100,7 +124,10 @@ mod tests {
             vec![dependency_id, dependency_id],
         );
 
-        assert!(task.is_err());
+        assert!(matches!(
+            task,
+            Err(WorkflowTaskError::DuplicateDependency)
+        ));
     }
 
     #[test]
@@ -109,6 +136,6 @@ mod tests {
 
         let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![task_id]);
 
-        assert!(task.is_err());
+        assert!(matches!(task, Err(WorkflowTaskError::SelfDependency)));
     }
 }

@@ -83,20 +83,21 @@ mod tests {
 
         assert_eq!(workflow.name(), "send_email");
         assert!(workflow.versions().is_empty());
+        assert_ne!(workflow.id(), WorkflowId::new());
     }
 
     #[test]
     fn rejects_empty_name() {
         let workflow = Workflow::new("".to_owned());
 
-        assert!(workflow.is_err());
+        assert!(matches!(workflow, Err(WorkflowError::InvalidName)));
     }
 
     #[test]
     fn rejects_whitespace_name() {
         let workflow = Workflow::new("   ".to_owned());
 
-        assert!(workflow.is_err());
+        assert!(matches!(workflow, Err(WorkflowError::InvalidName)));
     }
 
     #[test]
@@ -108,6 +109,8 @@ mod tests {
         let version = workflow.add_version(definition).unwrap();
 
         assert_eq!(version.version(), 1);
+        assert_eq!(version.workflow_id(), workflow.id());
+        assert_eq!(workflow.versions().len(), 1);
     }
 
     #[test]
@@ -124,5 +127,6 @@ mod tests {
         let second_version = workflow.add_version(second_definition).unwrap();
 
         assert_eq!(second_version.version(), 2);
+        assert_eq!(workflow.versions().len(), 2);
     }
 }

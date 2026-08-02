@@ -77,6 +77,8 @@ mod tests {
 
         assert_eq!(version.workflow_id(), workflow_id);
         assert_eq!(version.version(), 3);
+        assert_eq!(version.definition().tasks().len(), 1);
+        assert_ne!(version.id(), WorkflowVersionId::new());
     }
 
     #[test]
@@ -87,6 +89,9 @@ mod tests {
 
         let version = WorkflowVersion::new(workflow_id, 0, definition);
 
-        assert!(version.is_err());
+        assert!(matches!(
+            version,
+            Err(WorkflowVersionError::InvalidVersion)
+        ));
     }
 }

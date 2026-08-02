@@ -41,5 +41,7 @@ mod tests {
         let event = Event::new(execution_id, ExecutionStarted);
 
         assert_eq!(event.execution_id(), execution_id);
+        assert_eq!(*event.payload(), ExecutionStarted);
+        assert_ne!(event.id(), EventId::new());
     }
 }

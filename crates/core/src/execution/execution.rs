@@ -303,6 +303,55 @@ mod tests {
     }
 
     #[test]
+    fn cancel_cascades_to_pending_and_running_tasks() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let pending_task_id = WorkflowTaskId::new();
+        let running_task_id = WorkflowTaskId::new();
+
+        let mut execution = Execution::new(workflow_version_id);
+        execution.add_task(pending_task_id).unwrap();
+        execution.add_task(running_task_id).unwrap();
+
+        execution.start().unwrap();
+
+        let definition = WorkflowDefinition::new(vec![
+            WorkflowTask::new(pending_task_id, "validate".to_owned(), vec![]).unwrap(),
+            WorkflowTask::new(running_task_id, "send_email".to_owned(), vec![]).unwrap(),
+        ])
+        .unwrap();
+
+        execution
+            .start_task(running_task_id, &definition)
+            .unwrap();
+
+        execution.cancel().unwrap();
+
+        assert_eq!(execution.status(), ExecutionStatus::Cancelled);
+        assert_eq!(execution.tasks()[0].status(), TaskStatus::Cancelled);
+        assert_eq!(execution.tasks()[1].status(), TaskStatus::Cancelled);
+    }
+
+    #[test]
+    fn cannot_complete_with_incomplete_tasks() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+
+        execution.start().unwrap();
+
+        let error = execution.complete().unwrap_err();
+
+        assert!(matches!(error, ExecutionError::IncompleteTasks));
+        assert_eq!(execution.status(), ExecutionStatus::Running);
+    }
+
+    #[test]
     fn running_can_terminate() {
         let workflow_version_id = WorkflowVersionId::new();
         let mut execution = Execution::new(workflow_version_id);
@@ -330,11 +379,13 @@ mod tests {
     }
 
     #[test]
-    fn pending_cannot_cancel() {
+    fn pending_can_cancel() {
         let workflow_version_id = WorkflowVersionId::new();
         let mut execution = Execution::new(workflow_version_id);
 
-        assert!(execution.cancel().is_err());
+        execution.cancel().unwrap();
+
+        assert_eq!(execution.status(), ExecutionStatus::Cancelled);
     }
 
     #[test]
@@ -527,6 +578,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![dependency, task]).unwrap();
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
 
         assert_eq!(execution.ready_tasks(&definition), vec![dependency_id]);
 
@@ -560,6 +612,7 @@ mod tests {
             WorkflowDefinition::new(vec![first_dependency, second_dependency, task]).unwrap();
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
 
         assert_eq!(
             execution.ready_tasks(&definition),
@@ -595,6 +648,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
 
         execution.start_task(workflow_task_id, &definition).unwrap();
 
@@ -613,6 +667,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
 
         execution.start_task(workflow_task_id, &definition).unwrap();
         execution.complete_task(workflow_task_id).unwrap();
@@ -639,6 +694,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![dependency, task]).unwrap();
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
 
         let error = execution.start_task(task_id, &definition).unwrap_err();
 
@@ -656,6 +712,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
 
         execution.start_task(workflow_task_id, &definition).unwrap();
 
@@ -664,6 +721,25 @@ mod tests {
             .unwrap_err();
 
         assert!(matches!(error, ExecutionError::TaskNotReady(_)));
+    }
+
+    #[test]
+    fn cannot_start_task_when_execution_is_not_running() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let workflow_task_id = WorkflowTaskId::new();
+
+        let workflow_task =
+            WorkflowTask::new(workflow_task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+
+        let error = execution
+            .start_task(workflow_task_id, &definition)
+            .unwrap_err();
+
+        assert!(matches!(error, ExecutionError::ExecutionNotRunning));
     }
 
     #[test]
@@ -677,6 +753,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
 
         let mut execution = Execution::new(workflow_version_id);
+        execution.start().unwrap();
 
         let error = execution
             .start_task(workflow_task_id, &definition)
@@ -700,6 +777,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
 
         execution.start_task(workflow_task_id, &definition).unwrap();
         execution.complete_task(workflow_task_id).unwrap();
@@ -737,6 +815,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
 
         execution.start_task(workflow_task_id, &definition).unwrap();
         execution.complete_task(workflow_task_id).unwrap();
@@ -773,6 +852,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
 
         execution.start_task(workflow_task_id, &definition).unwrap();
         execution.fail_task(workflow_task_id).unwrap();
@@ -810,6 +890,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
 
         execution.start_task(workflow_task_id, &definition).unwrap();
         execution.fail_task(workflow_task_id).unwrap();
@@ -846,6 +927,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
 
         execution.start_task(workflow_task_id, &definition).unwrap();
         execution.cancel_task(workflow_task_id).unwrap();
@@ -855,7 +937,7 @@ mod tests {
     }
 
     #[test]
-    fn pending_task_cannot_cancel() {
+    fn pending_task_can_cancel() {
         let workflow_version_id = WorkflowVersionId::new();
         let workflow_task_id = WorkflowTaskId::new();
 
@@ -866,10 +948,9 @@ mod tests {
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
 
-        let error = execution.cancel_task(workflow_task_id).unwrap_err();
+        execution.cancel_task(workflow_task_id).unwrap();
 
-        assert!(matches!(error, ExecutionError::TaskTransition(_)));
-        assert_eq!(execution.tasks()[0].status(), TaskStatus::Pending);
+        assert_eq!(execution.tasks()[0].status(), TaskStatus::Cancelled);
     }
 
     #[test]
@@ -883,6 +964,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![workflow_task]).unwrap();
 
         let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        execution.start().unwrap();
 
         execution.start_task(workflow_task_id, &definition).unwrap();
         execution.cancel_task(workflow_task_id).unwrap();
