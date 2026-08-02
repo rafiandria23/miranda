@@ -5,6 +5,7 @@ use crate::{
 
 use super::{ExecutionError, ExecutionStatus};
 
+#[derive(Debug)]
 pub struct Execution {
     id: ExecutionId,
     workflow_version_id: WorkflowVersionId,

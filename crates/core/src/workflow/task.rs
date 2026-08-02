@@ -4,6 +4,7 @@ use crate::id::WorkflowTaskId;
 
 use super::WorkflowTaskError;
 
+#[derive(Debug)]
 pub struct WorkflowTask {
     id: WorkflowTaskId,
     task_type: String,
@@ -124,10 +125,7 @@ mod tests {
             vec![dependency_id, dependency_id],
         );
 
-        assert!(matches!(
-            task,
-            Err(WorkflowTaskError::DuplicateDependency)
-        ));
+        assert!(matches!(task, Err(WorkflowTaskError::DuplicateDependency)));
     }
 
     #[test]

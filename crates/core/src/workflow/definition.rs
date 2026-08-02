@@ -4,6 +4,7 @@ use crate::id::WorkflowTaskId;
 
 use super::{WorkflowDefinitionError, WorkflowTask};
 
+#[derive(Debug)]
 pub struct WorkflowDefinition {
     tasks: Vec<WorkflowTask>,
 }
