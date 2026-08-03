@@ -897,6 +897,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "miranda-engine"
+version = "0.1.0"
+dependencies = [
+ "miranda-core",
+ "miranda-scheduler",
+ "miranda-storage",
+ "miranda-worker",
+ "thiserror",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
 name = "miranda-runtime"
 version = "0.1.0"
 dependencies = [

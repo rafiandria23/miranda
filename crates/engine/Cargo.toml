@@ -1,0 +1,14 @@
+[package]
+name = "miranda-engine"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+miranda-core = { path = "../core" }
+miranda-scheduler = { path = "../scheduler" }
+miranda-storage = { path = "../storage" }
+miranda-worker = { path = "../worker" }
+
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

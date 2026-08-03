@@ -70,6 +70,9 @@ pub enum EventPayload {
     TaskCancelled {
         workflow_task_id: WorkflowTaskId,
     },
+    TaskRetried {
+        workflow_task_id: WorkflowTaskId,
+    },
 
     // Attempt lifecycle
     AttemptCreated {

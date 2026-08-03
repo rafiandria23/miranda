@@ -339,6 +339,9 @@ impl Execution {
             EventPayload::TaskCancelled { workflow_task_id } => {
                 self.cancel_task(*workflow_task_id)?;
             }
+            EventPayload::TaskRetried { workflow_task_id } => {
+                self.retry_task(*workflow_task_id, definition)?;
+            }
 
             // No-ops for initialization/internal events
             EventPayload::ExecutionCreated => {}
