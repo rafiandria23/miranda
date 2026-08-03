@@ -1,3 +1,3 @@
 fn main() {
-    println!("Miranda server");
+    println!("Hello, world!");
 }

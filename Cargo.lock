@@ -884,6 +884,10 @@ name = "miranda-cli"
 version = "0.1.0"
 
 [[package]]
+name = "miranda-control-plane"
+version = "0.1.0"
+
+[[package]]
 name = "miranda-core"
 version = "0.1.0"
 dependencies = [
@@ -903,6 +907,10 @@ dependencies = [
  "tokio",
  "tracing",
 ]
+
+[[package]]
+name = "miranda-scheduler"
+version = "0.1.0"
 
 [[package]]
 name = "miranda-server"
@@ -928,6 +936,10 @@ dependencies = [
  "tokio",
  "tracing",
 ]
+
+[[package]]
+name = "miranda-worker"
+version = "0.1.0"
 
 [[package]]
 name = "num-traits"
