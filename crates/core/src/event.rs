@@ -1,3 +1,7 @@
+pub mod payload;
+
+pub use payload::EventPayload;
+
 use serde::{Deserialize, Serialize};
 
 use crate::id::{EventId, ExecutionId};

@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::ExecutionError;
-use crate::id::{WorkflowId, WorkflowVersionId};
-
-use super::WorkflowDefinition;
+use crate::{
+    error::ExecutionError,
+    id::{WorkflowId, WorkflowVersionId},
+    workflow::WorkflowDefinition,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowVersion {
@@ -62,8 +63,7 @@ impl WorkflowVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::definition::WorkflowTask;
-    use crate::id::WorkflowTaskId;
+    use crate::{id::WorkflowTaskId, workflow::WorkflowTask};
 
     #[test]
     fn creates_workflow_version() {

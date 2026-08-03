@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::ExecutionError;
-use crate::id::{AttemptId, TaskId};
-
-use super::AttemptStatus;
+use crate::{
+    error::ExecutionError,
+    execution::status::AttemptStatus,
+    id::{AttemptId, TaskId},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Attempt {

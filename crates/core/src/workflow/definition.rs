@@ -1,10 +1,7 @@
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-use crate::error::ExecutionError;
-use crate::id::WorkflowTaskId;
-
-use super::WorkflowTask;
+use crate::{error::ExecutionError, id::WorkflowTaskId, workflow::WorkflowTask};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowDefinition {

@@ -1,9 +1,14 @@
+pub mod definition;
+pub mod task;
+pub mod version;
+
+pub use definition::WorkflowDefinition;
+pub use task::WorkflowTask;
+pub use version::WorkflowVersion;
+
 use serde::{Deserialize, Serialize};
 
-use crate::error::ExecutionError;
-use crate::id::WorkflowId;
-
-use super::{WorkflowDefinition, WorkflowVersion};
+use crate::{error::ExecutionError, id::WorkflowId};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Workflow {

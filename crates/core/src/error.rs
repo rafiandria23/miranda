@@ -1,7 +1,9 @@
 use thiserror::Error;
 
-use crate::id::WorkflowTaskId;
-use crate::instance::{AttemptStatus, ExecutionStatus, TaskStatus};
+use crate::{
+    execution::{AttemptStatus, ExecutionStatus, TaskStatus},
+    id::WorkflowTaskId,
+};
 
 // Unified domain error type representing all invariant and validation failures in `miranda-core`.
 #[derive(Debug, Error, PartialEq, Eq, Clone)]

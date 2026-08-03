@@ -1,11 +1,18 @@
+pub mod attempt;
+pub mod status;
+pub mod task;
+
+pub use attempt::Attempt;
+pub use status::{AttemptStatus, ExecutionStatus, TaskStatus};
+pub use task::Task;
+
 use serde::{Deserialize, Serialize};
 
-use crate::definition::{WorkflowDefinition, WorkflowTask};
-use crate::error::ExecutionError;
-use crate::id::{ExecutionId, WorkflowTaskId, WorkflowVersionId};
-use crate::instance::task::{Task, TaskStatus};
-
-use super::ExecutionStatus;
+use crate::{
+    error::ExecutionError,
+    id::{ExecutionId, WorkflowTaskId, WorkflowVersionId},
+    workflow::{WorkflowDefinition, WorkflowTask},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Execution {
@@ -303,8 +310,6 @@ impl Execution {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::definition::{WorkflowDefinition, WorkflowTask};
-    use crate::instance::task::TaskStatus;
 
     #[test]
     fn creates_execution() {

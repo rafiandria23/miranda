@@ -1,10 +1,10 @@
 use serde::{Deserialize, Serialize};
 
-use crate::error::ExecutionError;
-use crate::id::{ExecutionId, TaskId, WorkflowTaskId};
-use crate::instance::attempt::Attempt;
-
-use super::TaskStatus;
+use crate::{
+    error::ExecutionError,
+    execution::{attempt::Attempt, status::TaskStatus},
+    id::{ExecutionId, TaskId, WorkflowTaskId},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Task {
