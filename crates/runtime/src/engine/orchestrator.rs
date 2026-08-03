@@ -1,7 +1,7 @@
 use futures_util::future::join_all;
 use miranda_core::{
-    definition::WorkflowDefinition,
-    instance::{Execution, TaskStatus},
+    execution::{Execution, TaskStatus},
+    workflow::WorkflowDefinition,
 };
 use miranda_storage::WorkflowStore;
 use std::sync::Arc;

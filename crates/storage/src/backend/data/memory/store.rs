@@ -1,12 +1,12 @@
 use miranda_core::{
-    definition::{Workflow, WorkflowDefinition},
+    execution::Execution,
     id::{ExecutionId, WorkflowId, WorkflowVersionId},
-    instance::Execution,
+    workflow::WorkflowDefinition,
 };
 use std::{collections::HashMap, sync::Arc};
 use tokio::sync::RwLock;
 
-use crate::{error::StorageError, traits::WorkflowStore};
+use crate::{error::StorageError, workflow_store::WorkflowStore};
 
 #[derive(Default, Clone)]
 pub struct MemoryStore {
@@ -59,9 +59,7 @@ impl WorkflowStore for MemoryStore {
         definitions
             .get(&version_id)
             .map(|(_, _, definition)| definition.clone())
-            .ok_or(StorageError::WorkflowNotFound(WorkflowId::from_uuid(
-                *version_id.as_uuid(),
-            )))
+            .ok_or(StorageError::WorkflowVersionNotFound(version_id))
     }
 
     async fn save_execution(&self, execution: &Execution) -> Result<(), StorageError> {

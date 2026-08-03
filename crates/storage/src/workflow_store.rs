@@ -1,7 +1,7 @@
 use miranda_core::{
-    definition::WorkflowDefinition,
+    execution::Execution,
     id::{ExecutionId, WorkflowId, WorkflowVersionId},
-    instance::Execution,
+    workflow::WorkflowDefinition,
 };
 use std::future::Future;
 

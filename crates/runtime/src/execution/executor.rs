@@ -1,4 +1,4 @@
-use miranda_core::definition::WorkflowTask;
+use miranda_core::workflow::WorkflowTask;
 use std::future::Future;
 
 use super::TaskResult;

@@ -1,5 +1,5 @@
-use miranda_core::{definition::WorkflowTask, id::WorkerId};
-use std::{future::Future, process::Output};
+use miranda_core::{id::WorkerId, workflow::WorkflowTask};
+use std::future::Future;
 
 use crate::RuntimeError;
 

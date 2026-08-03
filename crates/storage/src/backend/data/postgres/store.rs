@@ -1,11 +1,12 @@
 use miranda_core::{
-    definition::WorkflowDefinition,
+    execution::Execution,
+    execution::status::ExecutionStatus,
     id::{ExecutionId, WorkflowId, WorkflowVersionId},
-    instance::Execution,
+    workflow::WorkflowDefinition,
 };
 use sqlx::{PgPool, postgres::PgPoolOptions};
 
-use crate::{error::StorageError, traits::WorkflowStore};
+use crate::{error::StorageError, workflow_store::WorkflowStore};
 
 use super::PostgresConfig;
 
@@ -205,7 +206,10 @@ impl WorkflowStore for PostgresStore {
     }
 
     async fn get_active_executions(&self) -> Result<Vec<Execution>, StorageError> {
-        let active_statuses = vec!["pending".to_string(), "running".to_string()];
+        let active_statuses = vec![
+            ExecutionStatus::Pending.as_str().to_string(),
+            ExecutionStatus::Running.as_str().to_string(),
+        ];
 
         let active_rows = sqlx::query!(
             r#"
