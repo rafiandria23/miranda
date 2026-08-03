@@ -34,7 +34,7 @@ pub trait Router: Send + Sync {
 // In-Memory Implementation
 // =========================================================================
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct InMemoryRouter {
     workers: Arc<RwLock<HashMap<WorkerId, WorkerInfo>>>,
 }

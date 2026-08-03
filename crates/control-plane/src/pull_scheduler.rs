@@ -2,7 +2,7 @@ use miranda_core::id::WorkerId;
 
 use crate::{
     ControlPlaneError,
-    queue::{TaskAssignment, TaskQueue},
+    queue::{QueueItem, TaskQueue},
 };
 
 #[derive(Debug)]
@@ -18,10 +18,7 @@ where
         Self { queue }
     }
 
-    pub async fn poll(
-        &self,
-        _worker_id: WorkerId,
-    ) -> Result<Option<TaskAssignment>, ControlPlaneError> {
+    pub async fn poll(&self, _worker_id: WorkerId) -> Result<Option<QueueItem>, ControlPlaneError> {
         // Worker polls for next available task
         // No worker-specific routing in basic pull model
         self.queue.dequeue().await

@@ -876,10 +876,12 @@ name = "miranda-control-plane"
 version = "0.1.0"
 dependencies = [
  "miranda-core",
+ "miranda-scheduler",
  "miranda-storage",
  "miranda-worker",
  "thiserror",
  "tokio",
+ "uuid",
 ]
 
 [[package]]

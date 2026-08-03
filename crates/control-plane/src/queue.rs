@@ -8,7 +8,7 @@ use tokio::sync::Mutex;
 use crate::ControlPlaneError;
 
 #[derive(Debug)]
-pub struct TaskAssignment {
+pub struct QueueItem {
     pub execution_id: ExecutionId,
     pub workflow_task_id: WorkflowTaskId,
     pub definition: Arc<WorkflowDefinition>,
@@ -17,21 +17,19 @@ pub struct TaskAssignment {
 pub trait TaskQueue: Send + Sync {
     fn enqueue(
         &self,
-        assignment: TaskAssignment,
+        item: QueueItem,
     ) -> impl Future<Output = Result<(), ControlPlaneError>> + Send;
 
-    fn dequeue(
-        &self,
-    ) -> impl Future<Output = Result<Option<TaskAssignment>, ControlPlaneError>> + Send;
+    fn dequeue(&self) -> impl Future<Output = Result<Option<QueueItem>, ControlPlaneError>> + Send;
 }
 
 // =========================================================================
 // In-Memory Implementation
 // =========================================================================
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct InMemoryTaskQueue {
-    inner: Arc<Mutex<VecDeque<TaskAssignment>>>,
+    inner: Arc<Mutex<VecDeque<QueueItem>>>,
 }
 
 impl InMemoryTaskQueue {
@@ -41,15 +39,15 @@ impl InMemoryTaskQueue {
 }
 
 impl TaskQueue for InMemoryTaskQueue {
-    async fn enqueue(&self, assignment: TaskAssignment) -> Result<(), ControlPlaneError> {
+    async fn enqueue(&self, item: QueueItem) -> Result<(), ControlPlaneError> {
         let mut queue = self.inner.lock().await;
 
-        queue.push_back(assignment);
+        queue.push_back(item);
 
         Ok(())
     }
 
-    async fn dequeue(&self) -> Result<Option<TaskAssignment>, ControlPlaneError> {
+    async fn dequeue(&self) -> Result<Option<QueueItem>, ControlPlaneError> {
         let mut queue = self.inner.lock().await;
 
         Ok(queue.pop_front())

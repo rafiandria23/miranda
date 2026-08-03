@@ -8,8 +8,6 @@ use std::future::Future;
 use crate::error::StorageError;
 
 pub trait WorkflowStore: Send + Sync {
-    // Workflow Definition (versioned)
-
     fn save_definition(
         &self,
         workflow_id: WorkflowId,
@@ -28,8 +26,6 @@ pub trait WorkflowStore: Send + Sync {
         version_id: WorkflowVersionId,
     ) -> impl Future<Output = Result<WorkflowDefinition, StorageError>> + Send;
 
-    // Execution State Management
-
     fn save_execution(
         &self,
         execution: &Execution,
@@ -44,7 +40,7 @@ pub trait WorkflowStore: Send + Sync {
     fn get_execution(
         &self,
         execution_id: ExecutionId,
-    ) -> impl Future<Output = Result<Execution, StorageError>> + Send;
+    ) -> impl Future<Output = Result<(Execution, u64), StorageError>> + Send;
 
     fn get_active_executions(
         &self,

@@ -95,12 +95,15 @@ impl WorkflowStore for MemoryStore {
         Ok(())
     }
 
-    async fn get_execution(&self, execution_id: ExecutionId) -> Result<Execution, StorageError> {
+    async fn get_execution(
+        &self,
+        execution_id: ExecutionId,
+    ) -> Result<(Execution, u64), StorageError> {
         let executions = self.executions.read().await;
 
         executions
             .get(&execution_id)
-            .map(|(execution, _)| execution.clone())
+            .map(|(execution, version)| (execution.clone(), *version))
             .ok_or(StorageError::ExecutionNotFound(execution_id))
     }
 

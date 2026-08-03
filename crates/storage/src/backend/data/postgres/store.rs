@@ -183,26 +183,27 @@ impl WorkflowStore for PostgresStore {
         }
     }
 
-    async fn get_execution(&self, execution_id: ExecutionId) -> Result<Execution, StorageError> {
+    async fn get_execution(
+        &self,
+        execution_id: ExecutionId,
+    ) -> Result<(Execution, u64), StorageError> {
         let execution_row = sqlx::query!(
             r#"
-            SELECT state FROM workflow_executions
-            WHERE id = $1
-            "#,
+        SELECT state, version FROM workflow_executions
+        WHERE id = $1
+        "#,
             execution_id.as_uuid()
         )
         .fetch_optional(&self.pool)
         .await
         .map_err(|e| StorageError::Database(e.to_string()))?;
 
-        let execution_value = execution_row
-            .map(|row| row.state)
-            .ok_or(StorageError::ExecutionNotFound(execution_id))?;
+        let row = execution_row.ok_or(StorageError::ExecutionNotFound(execution_id))?;
 
-        let execution: Execution = serde_json::from_value(execution_value)
+        let execution: Execution = serde_json::from_value(row.state)
             .map_err(|e| StorageError::Serialization(e.to_string()))?;
 
-        Ok(execution)
+        Ok((execution, row.version as u64))
     }
 
     async fn get_active_executions(&self) -> Result<Vec<Execution>, StorageError> {

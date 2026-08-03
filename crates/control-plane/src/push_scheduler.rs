@@ -2,7 +2,7 @@ use miranda_core::id::WorkerId;
 
 use crate::{
     ControlPlaneError,
-    queue::{TaskAssignment, TaskQueue},
+    queue::{QueueItem, TaskQueue},
     router::Router,
 };
 
@@ -21,24 +21,24 @@ where
         Self { queue, router }
     }
 
-    pub async fn dispatch(&self) -> Result<Option<(WorkerId, TaskAssignment)>, ControlPlaneError> {
-        let assignment = match self.queue.dequeue().await? {
+    pub async fn dispatch(&self) -> Result<Option<(WorkerId, QueueItem)>, ControlPlaneError> {
+        let item = match self.queue.dequeue().await? {
             Some(a) => a,
             None => return Ok(None),
         };
 
         // Find capable worker for this task type
-        let task_type = "default"; // TODO: get from assignment.definition
+        let task_type = "default"; // TODO: get from item.definition
         let worker_id = match self.router.select_worker(task_type).await {
             Some(w_id) => w_id,
             None => {
                 // No worker available, re-queue
-                self.queue.enqueue(assignment).await?;
+                self.queue.enqueue(item).await?;
 
                 return Ok(None);
             }
         };
 
-        Ok(Some((worker_id, assignment)))
+        Ok(Some((worker_id, item)))
     }
 }
