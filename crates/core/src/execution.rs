@@ -10,6 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     error::ExecutionError,
+    event::{Event, EventPayload},
     id::{ExecutionId, WorkflowTaskId, WorkflowVersionId},
     workflow::{WorkflowDefinition, WorkflowTask},
 };
@@ -305,6 +306,52 @@ impl Execution {
 
         Ok(recovered_count)
     }
+
+    pub fn apply(
+        &mut self,
+        event: Event,
+        definition: &WorkflowDefinition,
+    ) -> Result<Event, ExecutionError> {
+        if event.execution_id() != self.id {
+            return Err(ExecutionError::InvalidIdFormat(
+                "event execution_id mismatch".to_string(),
+            ));
+        }
+
+        match event.payload() {
+            // Execution lifecycle
+            EventPayload::ExecutionStarted => self.start()?,
+            EventPayload::ExecutionCompleted => self.complete()?,
+            EventPayload::ExecutionFailed => self.fail()?,
+            EventPayload::ExecutionCancelled => self.cancel()?,
+            EventPayload::ExecutionTerminated => self.terminate()?,
+
+            // Task lifecycle
+            EventPayload::TaskStarted { workflow_task_id } => {
+                self.start_task(*workflow_task_id, definition)?;
+            }
+            EventPayload::TaskCompleted { workflow_task_id } => {
+                self.complete_task(*workflow_task_id)?;
+            }
+            EventPayload::TaskFailed { workflow_task_id } => {
+                self.fail_task(*workflow_task_id)?;
+            }
+            EventPayload::TaskCancelled { workflow_task_id } => {
+                self.cancel_task(*workflow_task_id)?;
+            }
+
+            // No-ops for initialization/internal events
+            EventPayload::ExecutionCreated => {}
+            EventPayload::TaskCreated { .. } => {}
+            EventPayload::AttemptCreated { .. } => {}
+            EventPayload::AttemptStarted { .. } => {}
+            EventPayload::AttemptSucceeded { .. } => {}
+            EventPayload::AttemptFailed { .. } => {}
+            EventPayload::AttemptCancelled { .. } => {}
+        }
+
+        Ok(event)
+    }
 }
 
 #[cfg(test)]
@@ -457,5 +504,95 @@ mod tests {
         assert_eq!(execution.tasks()[0].status(), TaskStatus::Pending);
         // Task is immediately available for ready_tasks scheduling again
         assert_eq!(execution.ready_tasks(&definition), vec![workflow_task_id]);
+    }
+
+    #[test]
+    fn apply_execution_started() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let mut execution = Execution::new(workflow_version_id);
+
+        let event = Event::new(execution.id(), EventPayload::ExecutionStarted);
+        execution
+            .apply(event, &WorkflowDefinition::new(vec![]).unwrap())
+            .unwrap();
+
+        assert_eq!(execution.status(), ExecutionStatus::Running);
+    }
+
+    #[test]
+    fn apply_task_started_and_completed() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let task_id = WorkflowTaskId::new();
+
+        let task = WorkflowTask::new(task_id, "test".to_owned(), vec![]).unwrap();
+        let definition = WorkflowDefinition::new(vec![task]).unwrap();
+
+        let mut execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+
+        execution
+            .apply(
+                Event::new(execution.id(), EventPayload::ExecutionStarted),
+                &definition,
+            )
+            .unwrap();
+
+        execution
+            .apply(
+                Event::new(
+                    execution.id(),
+                    EventPayload::TaskStarted {
+                        workflow_task_id: task_id,
+                    },
+                ),
+                &definition,
+            )
+            .unwrap();
+
+        execution
+            .apply(
+                Event::new(
+                    execution.id(),
+                    EventPayload::TaskCompleted {
+                        workflow_task_id: task_id,
+                    },
+                ),
+                &definition,
+            )
+            .unwrap();
+
+        assert_eq!(
+            execution.task(task_id).unwrap().status(),
+            TaskStatus::Completed
+        );
+    }
+
+    #[test]
+    fn apply_invalid_transition_fails() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let mut execution = Execution::new(workflow_version_id);
+
+        let event = Event::new(execution.id(), EventPayload::ExecutionCompleted);
+        let err = execution
+            .apply(event, &WorkflowDefinition::new(vec![]).unwrap())
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            ExecutionError::InvalidExecutionTransition { .. }
+        ));
+    }
+
+    #[test]
+    fn apply_execution_id_mismatch_fails() {
+        let workflow_version_id = WorkflowVersionId::new();
+        let mut execution = Execution::new(workflow_version_id);
+        let wrong_id = ExecutionId::new();
+
+        let event = Event::new(wrong_id, EventPayload::ExecutionStarted);
+        let err = execution
+            .apply(event, &WorkflowDefinition::new(vec![]).unwrap())
+            .unwrap_err();
+
+        assert!(matches!(err, ExecutionError::InvalidIdFormat(_)));
     }
 }
