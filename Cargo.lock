@@ -874,6 +874,13 @@ version = "0.1.0"
 [[package]]
 name = "miranda-control-plane"
 version = "0.1.0"
+dependencies = [
+ "miranda-core",
+ "miranda-storage",
+ "miranda-worker",
+ "thiserror",
+ "tokio",
+]
 
 [[package]]
 name = "miranda-core"
