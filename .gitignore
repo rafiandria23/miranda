@@ -1,1 +1,37 @@
-/target
+# Rust build artifacts
+/target/
+**/target/
+
+# Cargo lock files (keep for binaries, ignore for libraries)
+# Uncomment the next line if this is a library workspace:
+# Cargo.lock
+
+# IDE and editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# SQLx offline query metadata (optional — commit for CI, ignore for local dev)
+# .sqlx/
+
+# Test artifacts
+*.profraw
+*.profdata
+
+# Documentation build
+/doc/
+
+# OS files
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.bak

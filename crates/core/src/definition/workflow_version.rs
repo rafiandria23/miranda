@@ -9,14 +9,14 @@ use super::WorkflowDefinition;
 pub struct WorkflowVersion {
     id: WorkflowVersionId,
     workflow_id: WorkflowId,
-    version: u32,
+    version: u64,
     definition: WorkflowDefinition,
 }
 
 impl WorkflowVersion {
     pub fn new(
         workflow_id: WorkflowId,
-        version: u32,
+        version: u64,
         definition: WorkflowDefinition,
     ) -> Result<Self, ExecutionError> {
         let workflow_version = Self {
@@ -38,7 +38,7 @@ impl WorkflowVersion {
         self.workflow_id
     }
 
-    pub fn version(&self) -> u32 {
+    pub fn version(&self) -> u64 {
         self.version
     }
 

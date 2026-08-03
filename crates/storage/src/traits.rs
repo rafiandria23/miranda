@@ -14,6 +14,7 @@ pub trait WorkflowStore: Send + Sync {
         &self,
         workflow_id: WorkflowId,
         version_id: WorkflowVersionId,
+        version: u64,
         definition: &WorkflowDefinition,
     ) -> impl Future<Output = Result<(), StorageError>> + Send;
 

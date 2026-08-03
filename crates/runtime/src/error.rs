@@ -13,7 +13,7 @@ pub enum RuntimeError {
     #[error("max retry attempts ({max_attempts}) reached for task '{task_id}'")]
     MaxAttemptsReached {
         task_id: WorkflowTaskId,
-        max_attempts: u32,
+        max_attempts: u64,
     },
 
     #[error("scheduler error: {0}")]

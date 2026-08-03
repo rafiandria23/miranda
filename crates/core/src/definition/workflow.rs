@@ -60,7 +60,7 @@ impl Workflow {
         &mut self,
         definition: WorkflowDefinition,
     ) -> Result<&WorkflowVersion, ExecutionError> {
-        let version = self.versions.len() as u32 + 1;
+        let version = self.versions.len() as u64 + 1;
         let workflow_version = WorkflowVersion::new(self.id, version, definition)?;
 
         self.versions.push(workflow_version);

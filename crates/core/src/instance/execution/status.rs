@@ -23,4 +23,15 @@ impl ExecutionStatus {
     pub fn is_running(&self) -> bool {
         matches!(self, Self::Running)
     }
+
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Pending => "pending",
+            Self::Running => "running",
+            Self::Completed => "completed",
+            Self::Failed => "failed",
+            Self::Cancelled => "cancelled",
+            Self::Terminated => "terminated",
+        }
+    }
 }

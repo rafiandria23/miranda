@@ -1,5 +1,5 @@
 use miranda_core::{
-    definition::WorkflowDefinition,
+    definition::{Workflow, WorkflowDefinition},
     id::{ExecutionId, WorkflowId, WorkflowVersionId},
     instance::Execution,
 };
@@ -10,7 +10,7 @@ use crate::{error::StorageError, traits::WorkflowStore};
 
 #[derive(Default, Clone)]
 pub struct MemoryStore {
-    definitions: Arc<RwLock<HashMap<WorkflowVersionId, (WorkflowId, WorkflowDefinition)>>>,
+    definitions: Arc<RwLock<HashMap<WorkflowVersionId, (WorkflowId, u64, WorkflowDefinition)>>>,
     executions: Arc<RwLock<HashMap<ExecutionId, (Execution, u64)>>>, // (Execution, Version)
 }
 
@@ -25,11 +25,12 @@ impl WorkflowStore for MemoryStore {
         &self,
         workflow_id: WorkflowId,
         version_id: WorkflowVersionId,
+        version: u64,
         definition: &WorkflowDefinition,
     ) -> Result<(), StorageError> {
         let mut definitions = self.definitions.write().await;
 
-        definitions.insert(version_id, (workflow_id, definition.clone()));
+        definitions.insert(version_id, (workflow_id, version, definition.clone()));
 
         Ok(())
     }
@@ -42,7 +43,7 @@ impl WorkflowStore for MemoryStore {
 
         let versions: Vec<_> = definitions
             .iter()
-            .filter(|(_, (wf_id, _))| *wf_id == workflow_id)
+            .filter(|(_, (wf_id, _, _))| *wf_id == workflow_id)
             .map(|(version_id, _)| *version_id)
             .collect();
 
@@ -57,7 +58,7 @@ impl WorkflowStore for MemoryStore {
 
         definitions
             .get(&version_id)
-            .map(|(_, definition)| definition.clone())
+            .map(|(_, _, definition)| definition.clone())
             .ok_or(StorageError::WorkflowNotFound(WorkflowId::from_uuid(
                 *version_id.as_uuid(),
             )))

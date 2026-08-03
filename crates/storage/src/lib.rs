@@ -15,4 +15,4 @@ pub use traits::WorkflowStore;
 pub use memory::MemoryStore;
 
 #[cfg(feature = "postgres")]
-pub use postgres::PostgresStore;
+pub use postgres::{PostgresConfig, PostgresStore};
