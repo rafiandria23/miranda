@@ -56,6 +56,7 @@ impl WorkflowVersion {
         if self.version == 0 {
             return Err(ExecutionError::InvalidWorkflowVersion);
         }
+
         Ok(())
     }
 }
@@ -65,30 +66,60 @@ mod tests {
     use super::*;
     use crate::{id::WorkflowTaskId, workflow::WorkflowTask};
 
-    #[test]
-    fn creates_workflow_version() {
-        let workflow_id = WorkflowId::new();
+    fn single_task_definition() -> WorkflowDefinition {
         let task =
             WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![]).unwrap();
 
-        let definition = WorkflowDefinition::new(vec![task]).unwrap();
-        let version = WorkflowVersion::new(workflow_id, 3, definition).unwrap();
-
-        assert_eq!(version.workflow_id(), workflow_id);
-        assert_eq!(version.version(), 3);
-        assert_eq!(version.definition().tasks().len(), 1);
-        assert_ne!(version.id(), WorkflowVersionId::new());
+        WorkflowDefinition::new(vec![task]).unwrap()
     }
 
     #[test]
-    fn rejects_zero_version() {
+    fn new_assigns_a_fresh_id_and_stores_workflow_id_version_and_definition() {
         let workflow_id = WorkflowId::new();
-        let definition = WorkflowDefinition::new(vec![]).unwrap();
-        let version = WorkflowVersion::new(workflow_id, 0, definition);
+        let definition = single_task_definition();
 
-        assert!(matches!(
-            version,
-            Err(ExecutionError::InvalidWorkflowVersion)
-        ));
+        let version = WorkflowVersion::new(workflow_id, 3, definition.clone()).unwrap();
+
+        assert_eq!(version.workflow_id(), workflow_id);
+        assert_eq!(version.version(), 3);
+        assert_eq!(version.definition(), &definition);
+    }
+
+    #[test]
+    fn new_assigns_unique_ids_across_calls() {
+        let workflow_id = WorkflowId::new();
+
+        let first = WorkflowVersion::new(workflow_id, 1, single_task_definition()).unwrap();
+        let second = WorkflowVersion::new(workflow_id, 1, single_task_definition()).unwrap();
+
+        assert_ne!(first.id(), second.id());
+    }
+
+    #[test]
+    fn new_rejects_zero_version() {
+        let workflow_id = WorkflowId::new();
+
+        let version = WorkflowVersion::new(workflow_id, 0, single_task_definition());
+
+        assert_eq!(version, Err(ExecutionError::InvalidWorkflowVersion));
+    }
+
+    #[test]
+    fn validate_succeeds_for_nonzero_version() {
+        let workflow_id = WorkflowId::new();
+        let version = WorkflowVersion::new(workflow_id, 1, single_task_definition()).unwrap();
+
+        assert!(version.validate().is_ok());
+    }
+
+    #[test]
+    fn workflow_version_round_trips_through_json() {
+        let workflow_id = WorkflowId::new();
+        let version = WorkflowVersion::new(workflow_id, 5, single_task_definition()).unwrap();
+
+        let json = serde_json::to_string(&version).unwrap();
+        let deserialized: WorkflowVersion = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(version, deserialized);
     }
 }

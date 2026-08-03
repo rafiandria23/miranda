@@ -79,34 +79,42 @@ impl Workflow {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::WorkflowTaskId;
+
+    fn single_task_definition() -> WorkflowDefinition {
+        let task =
+            WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![]).unwrap();
+
+        WorkflowDefinition::new(vec![task]).unwrap()
+    }
 
     #[test]
     fn creates_workflow() {
-        let workflow = Workflow::new("send_email".to_owned()).unwrap();
+        let workflow = Workflow::new("onboarding".to_owned()).unwrap();
 
-        assert_eq!(workflow.name(), "send_email");
+        assert_eq!(workflow.name(), "onboarding");
         assert!(workflow.versions().is_empty());
-        assert_ne!(workflow.id(), WorkflowId::new());
     }
 
     #[test]
     fn rejects_empty_name() {
         let workflow = Workflow::new("".to_owned());
-        assert!(matches!(workflow, Err(ExecutionError::InvalidWorkflowName)));
+
+        assert_eq!(workflow, Err(ExecutionError::InvalidWorkflowName));
     }
 
     #[test]
     fn rejects_whitespace_name() {
         let workflow = Workflow::new("   ".to_owned());
-        assert!(matches!(workflow, Err(ExecutionError::InvalidWorkflowName)));
+
+        assert_eq!(workflow, Err(ExecutionError::InvalidWorkflowName));
     }
 
     #[test]
-    fn adds_first_version() {
-        let mut workflow = Workflow::new("send_email".to_owned()).unwrap();
-        let definition = WorkflowDefinition::new(vec![]).unwrap();
+    fn add_version_appends_first_version_starting_at_one() {
+        let mut workflow = Workflow::new("onboarding".to_owned()).unwrap();
 
-        let version = workflow.add_version(definition).unwrap();
+        let version = workflow.add_version(single_task_definition()).unwrap();
 
         assert_eq!(version.version(), 1);
         assert_eq!(version.workflow_id(), workflow.id());
@@ -114,17 +122,22 @@ mod tests {
     }
 
     #[test]
-    fn adds_incrementing_versions() {
-        let mut workflow = Workflow::new("send_email".to_owned()).unwrap();
+    fn add_version_increments_version_number_across_calls() {
+        let mut workflow = Workflow::new("onboarding".to_owned()).unwrap();
 
-        let first_definition = WorkflowDefinition::new(vec![]).unwrap();
-        let second_definition = WorkflowDefinition::new(vec![]).unwrap();
+        workflow.add_version(single_task_definition()).unwrap();
+        workflow.add_version(single_task_definition()).unwrap();
+        let third = workflow.add_version(single_task_definition()).unwrap();
 
-        let first_version = workflow.add_version(first_definition).unwrap();
-        assert_eq!(first_version.version(), 1);
+        assert_eq!(third.version(), 3);
+        assert_eq!(workflow.versions().len(), 3);
+    }
 
-        let second_version = workflow.add_version(second_definition).unwrap();
-        assert_eq!(second_version.version(), 2);
-        assert_eq!(workflow.versions().len(), 2);
+    #[test]
+    fn validate_succeeds_for_well_formed_workflow() {
+        let mut workflow = Workflow::new("onboarding".to_owned()).unwrap();
+        workflow.add_version(single_task_definition()).unwrap();
+
+        assert!(workflow.validate().is_ok());
     }
 }

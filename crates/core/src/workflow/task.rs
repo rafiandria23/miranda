@@ -73,45 +73,47 @@ mod tests {
     use super::*;
 
     #[test]
-    fn creates_workflow_task() {
-        let task_id = WorkflowTaskId::new();
-        let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
+    fn new_stores_id_task_type_and_dependencies() {
+        let id = WorkflowTaskId::new();
+        let dependency_id = WorkflowTaskId::new();
 
-        assert_eq!(task.id(), task_id);
+        let task = WorkflowTask::new(id, "send_email".to_owned(), vec![dependency_id]).unwrap();
+
+        assert_eq!(task.id(), id);
         assert_eq!(task.task_type(), "send_email");
-        assert!(task.dependencies().is_empty());
+        assert_eq!(task.dependencies(), &[dependency_id]);
     }
 
     #[test]
-    fn creates_workflow_task_with_dependencies() {
-        let dependency_id = WorkflowTaskId::new();
-        let task = WorkflowTask::new(
-            WorkflowTaskId::new(),
-            "send_email".to_owned(),
-            vec![dependency_id],
-        )
-        .unwrap();
-
-        assert_eq!(task.dependencies(), [dependency_id]);
-    }
-
-    #[test]
-    fn rejects_empty_task_type() {
+    fn new_rejects_empty_task_type() {
         let task = WorkflowTask::new(WorkflowTaskId::new(), "".to_owned(), vec![]);
-        assert!(matches!(task, Err(ExecutionError::InvalidTaskType)));
+
+        assert_eq!(task, Err(ExecutionError::InvalidTaskType));
     }
 
     #[test]
-    fn rejects_whitespace_task_type() {
+    fn new_rejects_whitespace_task_type() {
         let task = WorkflowTask::new(WorkflowTaskId::new(), "   ".to_owned(), vec![]);
-        assert!(matches!(task, Err(ExecutionError::InvalidTaskType)));
+
+        assert_eq!(task, Err(ExecutionError::InvalidTaskType));
     }
 
     #[test]
-    fn rejects_duplicate_dependency() {
+    fn new_rejects_self_dependency() {
+        let id = WorkflowTaskId::new();
+
+        let task = WorkflowTask::new(id, "send_email".to_owned(), vec![id]);
+
+        assert_eq!(task, Err(ExecutionError::SelfDependency(id)));
+    }
+
+    #[test]
+    fn new_rejects_duplicate_dependency() {
+        let id = WorkflowTaskId::new();
         let dependency_id = WorkflowTaskId::new();
+
         let task = WorkflowTask::new(
-            WorkflowTaskId::new(),
+            id,
             "send_email".to_owned(),
             vec![dependency_id, dependency_id],
         );
@@ -123,10 +125,48 @@ mod tests {
     }
 
     #[test]
-    fn rejects_self_dependency() {
-        let task_id = WorkflowTaskId::new();
-        let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![task_id]);
+    fn new_allows_no_dependencies() {
+        let task = WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![]);
 
-        assert_eq!(task, Err(ExecutionError::SelfDependency(task_id)));
+        assert!(task.is_ok());
+    }
+
+    #[test]
+    fn new_allows_multiple_distinct_dependencies() {
+        let id = WorkflowTaskId::new();
+        let first_dependency = WorkflowTaskId::new();
+        let second_dependency = WorkflowTaskId::new();
+
+        let task = WorkflowTask::new(
+            id,
+            "send_email".to_owned(),
+            vec![first_dependency, second_dependency],
+        )
+        .unwrap();
+
+        assert_eq!(task.dependencies(), &[first_dependency, second_dependency]);
+    }
+
+    #[test]
+    fn validate_succeeds_for_well_formed_task() {
+        let task =
+            WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![]).unwrap();
+
+        assert!(task.validate().is_ok());
+    }
+
+    #[test]
+    fn workflow_task_round_trips_through_json() {
+        let task = WorkflowTask::new(
+            WorkflowTaskId::new(),
+            "send_email".to_owned(),
+            vec![WorkflowTaskId::new()],
+        )
+        .unwrap();
+
+        let json = serde_json::to_string(&task).unwrap();
+        let deserialized: WorkflowTask = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(task, deserialized);
     }
 }

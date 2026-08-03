@@ -98,92 +98,142 @@ mod tests {
     use super::*;
 
     #[test]
-    fn creates_attempt() {
+    fn new_stores_task_id_and_number_and_starts_pending() {
         let task_id = TaskId::new();
         let attempt = Attempt::new(task_id, 3).unwrap();
 
         assert_eq!(attempt.task_id(), task_id);
         assert_eq!(attempt.number(), 3);
         assert_eq!(attempt.status(), AttemptStatus::Pending);
-        assert_ne!(attempt.id(), AttemptId::new());
     }
 
     #[test]
-    fn rejects_zero_number() {
+    fn new_assigns_unique_ids_across_calls() {
         let task_id = TaskId::new();
-        let attempt = Attempt::new(task_id, 0);
 
-        assert!(matches!(attempt, Err(ExecutionError::InvalidAttemptNumber)));
+        let first = Attempt::new(task_id, 1).unwrap();
+        let second = Attempt::new(task_id, 1).unwrap();
+
+        assert_ne!(first.id(), second.id());
     }
 
     #[test]
-    fn validates_attempt() {
-        let task_id = TaskId::new();
-        let attempt = Attempt::new(task_id, 3).unwrap();
+    fn new_rejects_zero_number() {
+        let attempt = Attempt::new(TaskId::new(), 0);
+
+        assert_eq!(attempt, Err(ExecutionError::InvalidAttemptNumber));
+    }
+
+    #[test]
+    fn validate_succeeds_for_nonzero_number() {
+        let attempt = Attempt::new(TaskId::new(), 1).unwrap();
 
         assert!(attempt.validate().is_ok());
     }
 
     #[test]
-    fn pending_can_start() {
-        let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id, 3).unwrap();
+    fn start_transitions_pending_to_running() {
+        let mut attempt = Attempt::new(TaskId::new(), 1).unwrap();
 
         attempt.start().unwrap();
+
         assert_eq!(attempt.status(), AttemptStatus::Running);
     }
 
     #[test]
-    fn running_can_succeed() {
-        let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id, 3).unwrap();
-
+    fn succeed_transitions_running_to_succeeded() {
+        let mut attempt = Attempt::new(TaskId::new(), 1).unwrap();
         attempt.start().unwrap();
+
         attempt.succeed().unwrap();
+
         assert_eq!(attempt.status(), AttemptStatus::Succeeded);
     }
 
     #[test]
-    fn running_can_fail() {
-        let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id, 3).unwrap();
-
+    fn fail_transitions_running_to_failed() {
+        let mut attempt = Attempt::new(TaskId::new(), 1).unwrap();
         attempt.start().unwrap();
+
         attempt.fail().unwrap();
+
         assert_eq!(attempt.status(), AttemptStatus::Failed);
     }
 
     #[test]
-    fn running_can_cancel() {
-        let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id, 3).unwrap();
-
+    fn cancel_transitions_running_to_cancelled() {
+        let mut attempt = Attempt::new(TaskId::new(), 1).unwrap();
         attempt.start().unwrap();
+
         attempt.cancel().unwrap();
+
         assert_eq!(attempt.status(), AttemptStatus::Cancelled);
     }
 
     #[test]
     fn pending_cannot_succeed() {
-        let task_id = TaskId::new();
-        let mut attempt = Attempt::new(task_id, 3).unwrap();
+        let mut attempt = Attempt::new(TaskId::new(), 1).unwrap();
 
         let err = attempt.succeed().unwrap_err();
 
-        assert!(matches!(
+        assert_eq!(
             err,
             ExecutionError::InvalidAttemptTransition {
                 from: AttemptStatus::Pending,
                 to: AttemptStatus::Succeeded,
             }
-        ));
+        );
     }
 
     #[test]
-    fn terminal_states_cannot_transition() {
-        let task_id = TaskId::new();
+    fn pending_cannot_fail() {
+        let mut attempt = Attempt::new(TaskId::new(), 1).unwrap();
 
-        let mut attempt = Attempt::new(task_id, 1).unwrap();
+        let err = attempt.fail().unwrap_err();
+
+        assert_eq!(
+            err,
+            ExecutionError::InvalidAttemptTransition {
+                from: AttemptStatus::Pending,
+                to: AttemptStatus::Failed,
+            }
+        );
+    }
+
+    #[test]
+    fn pending_cannot_cancel() {
+        let mut attempt = Attempt::new(TaskId::new(), 1).unwrap();
+
+        let err = attempt.cancel().unwrap_err();
+
+        assert_eq!(
+            err,
+            ExecutionError::InvalidAttemptTransition {
+                from: AttemptStatus::Pending,
+                to: AttemptStatus::Cancelled,
+            }
+        );
+    }
+
+    #[test]
+    fn running_cannot_restart() {
+        let mut attempt = Attempt::new(TaskId::new(), 1).unwrap();
+        attempt.start().unwrap();
+
+        let err = attempt.start().unwrap_err();
+
+        assert_eq!(
+            err,
+            ExecutionError::InvalidAttemptTransition {
+                from: AttemptStatus::Running,
+                to: AttemptStatus::Running,
+            }
+        );
+    }
+
+    #[test]
+    fn succeeded_is_terminal() {
+        let mut attempt = Attempt::new(TaskId::new(), 1).unwrap();
         attempt.start().unwrap();
         attempt.succeed().unwrap();
 
@@ -191,5 +241,40 @@ mod tests {
         assert!(attempt.succeed().is_err());
         assert!(attempt.fail().is_err());
         assert!(attempt.cancel().is_err());
+    }
+
+    #[test]
+    fn failed_is_terminal() {
+        let mut attempt = Attempt::new(TaskId::new(), 1).unwrap();
+        attempt.start().unwrap();
+        attempt.fail().unwrap();
+
+        assert!(attempt.start().is_err());
+        assert!(attempt.succeed().is_err());
+        assert!(attempt.fail().is_err());
+        assert!(attempt.cancel().is_err());
+    }
+
+    #[test]
+    fn cancelled_is_terminal() {
+        let mut attempt = Attempt::new(TaskId::new(), 1).unwrap();
+        attempt.start().unwrap();
+        attempt.cancel().unwrap();
+
+        assert!(attempt.start().is_err());
+        assert!(attempt.succeed().is_err());
+        assert!(attempt.fail().is_err());
+        assert!(attempt.cancel().is_err());
+    }
+
+    #[test]
+    fn attempt_round_trips_through_json() {
+        let mut attempt = Attempt::new(TaskId::new(), 2).unwrap();
+        attempt.start().unwrap();
+
+        let json = serde_json::to_string(&attempt).unwrap();
+        let deserialized: Attempt = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(attempt, deserialized);
     }
 }

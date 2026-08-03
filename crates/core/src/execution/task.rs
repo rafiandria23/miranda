@@ -153,9 +153,10 @@ impl Task {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::execution::status::AttemptStatus;
 
     #[test]
-    fn creates_task() {
+    fn new_starts_pending_with_no_attempts() {
         let execution_id = ExecutionId::new();
         let workflow_task_id = WorkflowTaskId::new();
 
@@ -165,78 +166,207 @@ mod tests {
         assert_eq!(task.workflow_task_id(), workflow_task_id);
         assert_eq!(task.status(), TaskStatus::Pending);
         assert!(task.attempts().is_empty());
-        assert_ne!(task.id(), TaskId::new());
+        assert!(task.latest_attempt().is_none());
     }
 
     #[test]
-    fn pending_can_start() {
+    fn new_assigns_unique_ids_across_calls() {
         let execution_id = ExecutionId::new();
         let workflow_task_id = WorkflowTaskId::new();
 
-        let mut task = Task::new(execution_id, workflow_task_id);
+        let first = Task::new(execution_id, workflow_task_id);
+        let second = Task::new(execution_id, workflow_task_id);
+
+        assert_ne!(first.id(), second.id());
+    }
+
+    #[test]
+    fn start_transitions_to_running_and_adds_a_running_attempt() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
+
         task.start().unwrap();
 
         assert_eq!(task.status(), TaskStatus::Running);
         assert_eq!(task.attempts().len(), 1);
+        assert_eq!(task.latest_attempt().unwrap().number(), 1);
+        assert_eq!(
+            task.latest_attempt().unwrap().status(),
+            AttemptStatus::Running
+        );
     }
 
     #[test]
-    fn running_can_complete() {
-        let execution_id = ExecutionId::new();
-        let workflow_task_id = WorkflowTaskId::new();
-
-        let mut task = Task::new(execution_id, workflow_task_id);
+    fn start_cannot_be_called_from_completed() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
         task.start().unwrap();
         task.complete().unwrap();
 
-        assert_eq!(task.status(), TaskStatus::Completed);
+        let err = task.start().unwrap_err();
+
+        assert_eq!(
+            err,
+            ExecutionError::InvalidTaskTransition {
+                from: TaskStatus::Completed,
+                to: TaskStatus::Running,
+            }
+        );
     }
 
     #[test]
-    fn failed_task_can_retry() {
-        let execution_id = ExecutionId::new();
-        let workflow_task_id = WorkflowTaskId::new();
+    fn complete_transitions_to_completed_and_succeeds_latest_attempt() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
+        task.start().unwrap();
 
-        let mut task = Task::new(execution_id, workflow_task_id);
+        task.complete().unwrap();
 
+        assert_eq!(task.status(), TaskStatus::Completed);
+        assert_eq!(
+            task.latest_attempt().unwrap().status(),
+            AttemptStatus::Succeeded
+        );
+    }
+
+    #[test]
+    fn complete_fails_when_task_is_pending() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
+
+        let err = task.complete().unwrap_err();
+
+        assert_eq!(
+            err,
+            ExecutionError::InvalidTaskTransition {
+                from: TaskStatus::Pending,
+                to: TaskStatus::Completed,
+            }
+        );
+    }
+
+    #[test]
+    fn fail_transitions_to_failed_and_fails_latest_attempt() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
+        task.start().unwrap();
+
+        task.fail().unwrap();
+
+        assert_eq!(task.status(), TaskStatus::Failed);
+        assert_eq!(
+            task.latest_attempt().unwrap().status(),
+            AttemptStatus::Failed
+        );
+    }
+
+    #[test]
+    fn cancel_from_pending_transitions_without_an_attempt() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
+
+        task.cancel().unwrap();
+
+        assert_eq!(task.status(), TaskStatus::Cancelled);
+        assert!(task.attempts().is_empty());
+    }
+
+    #[test]
+    fn cancel_from_running_cancels_latest_attempt() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
+        task.start().unwrap();
+
+        task.cancel().unwrap();
+
+        assert_eq!(task.status(), TaskStatus::Cancelled);
+        assert_eq!(
+            task.latest_attempt().unwrap().status(),
+            AttemptStatus::Cancelled
+        );
+    }
+
+    #[test]
+    fn cancel_from_terminal_state_fails() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
+        task.start().unwrap();
+        task.complete().unwrap();
+
+        let err = task.cancel().unwrap_err();
+
+        assert_eq!(
+            err,
+            ExecutionError::InvalidTaskTransition {
+                from: TaskStatus::Completed,
+                to: TaskStatus::Cancelled,
+            }
+        );
+    }
+
+    #[test]
+    fn failed_task_can_restart_and_accumulates_attempts() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
         task.start().unwrap();
         task.fail().unwrap();
+
         task.start().unwrap();
 
         assert_eq!(task.status(), TaskStatus::Running);
+        assert_eq!(task.attempts().len(), 2);
+        assert_eq!(task.latest_attempt().unwrap().number(), 2);
+    }
+
+    #[test]
+    fn add_attempt_appends_incrementing_attempt_numbers() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
+
+        task.add_attempt().unwrap();
+        task.add_attempt().unwrap();
+
         assert_eq!(task.attempts().len(), 2);
         assert_eq!(task.attempts()[0].number(), 1);
         assert_eq!(task.attempts()[1].number(), 2);
     }
 
     #[test]
-    fn pending_cannot_complete() {
-        let execution_id = ExecutionId::new();
-        let workflow_task_id = WorkflowTaskId::new();
+    fn latest_attempt_mut_allows_mutating_the_last_attempt() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
+        task.start().unwrap();
 
-        let mut task = Task::new(execution_id, workflow_task_id);
+        task.latest_attempt_mut().unwrap().succeed().unwrap();
 
-        let err = task.complete().unwrap_err();
-
-        assert!(matches!(
-            err,
-            ExecutionError::InvalidTaskTransition {
-                from: TaskStatus::Pending,
-                to: TaskStatus::Completed,
-            }
-        ));
+        assert_eq!(
+            task.latest_attempt().unwrap().status(),
+            AttemptStatus::Succeeded
+        );
     }
 
     #[test]
-    fn running_can_reset_to_pending() {
-        let execution_id = ExecutionId::new();
-        let workflow_task_id = WorkflowTaskId::new();
-
-        let mut task = Task::new(execution_id, workflow_task_id);
+    fn reset_to_pending_resets_a_running_task() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
         task.start().unwrap();
 
-        assert_eq!(task.status(), TaskStatus::Running);
         task.reset_to_pending().unwrap();
+
         assert_eq!(task.status(), TaskStatus::Pending);
+    }
+
+    #[test]
+    fn reset_to_pending_fails_when_task_is_not_running() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
+
+        let err = task.reset_to_pending().unwrap_err();
+
+        assert_eq!(
+            err,
+            ExecutionError::InvalidTaskTransition {
+                from: TaskStatus::Pending,
+                to: TaskStatus::Pending,
+            }
+        );
+    }
+
+    #[test]
+    fn task_round_trips_through_json() {
+        let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
+        task.start().unwrap();
+
+        let json = serde_json::to_string(&task).unwrap();
+        let deserialized: Task = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(task, deserialized);
     }
 }

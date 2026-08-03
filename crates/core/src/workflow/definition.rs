@@ -106,113 +106,123 @@ impl WorkflowDefinition {
 mod tests {
     use super::*;
 
-    #[test]
-    fn creates_workflow_definition() {
-        let task =
-            WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![]).unwrap();
-
-        let definition = WorkflowDefinition::new(vec![task]).unwrap();
-        assert_eq!(definition.tasks().len(), 1);
+    fn task(id: WorkflowTaskId, dependencies: Vec<WorkflowTaskId>) -> WorkflowTask {
+        WorkflowTask::new(id, "send_email".to_owned(), dependencies).unwrap()
     }
 
     #[test]
-    fn creates_empty_workflow_definition() {
+    fn new_allows_an_empty_task_list() {
         let definition = WorkflowDefinition::new(vec![]).unwrap();
+
         assert!(definition.tasks().is_empty());
     }
 
     #[test]
-    fn creates_workflow_definition_with_dependencies() {
+    fn new_stores_the_given_tasks() {
+        let id = WorkflowTaskId::new();
+        let definition = WorkflowDefinition::new(vec![task(id, vec![])]).unwrap();
+
+        assert_eq!(definition.tasks().len(), 1);
+        assert_eq!(definition.tasks()[0].id(), id);
+    }
+
+    #[test]
+    fn new_rejects_duplicate_task_ids() {
+        let id = WorkflowTaskId::new();
+
+        let definition = WorkflowDefinition::new(vec![task(id, vec![]), task(id, vec![])]);
+
+        assert_eq!(definition, Err(ExecutionError::DuplicateTaskId(id)));
+    }
+
+    #[test]
+    fn new_rejects_dependency_on_unknown_task() {
+        let id = WorkflowTaskId::new();
+        let unknown_id = WorkflowTaskId::new();
+
+        let definition = WorkflowDefinition::new(vec![task(id, vec![unknown_id])]);
+
+        assert_eq!(definition, Err(ExecutionError::UnknownDependency));
+    }
+
+    #[test]
+    fn new_rejects_direct_dependency_cycle() {
+        let first_id = WorkflowTaskId::new();
+        let second_id = WorkflowTaskId::new();
+
+        let definition = WorkflowDefinition::new(vec![
+            task(first_id, vec![second_id]),
+            task(second_id, vec![first_id]),
+        ]);
+
+        assert_eq!(definition, Err(ExecutionError::CyclicDependency));
+    }
+
+    #[test]
+    fn new_rejects_transitive_dependency_cycle() {
+        let first_id = WorkflowTaskId::new();
+        let second_id = WorkflowTaskId::new();
+        let third_id = WorkflowTaskId::new();
+
+        let definition = WorkflowDefinition::new(vec![
+            task(first_id, vec![second_id]),
+            task(second_id, vec![third_id]),
+            task(third_id, vec![first_id]),
+        ]);
+
+        assert_eq!(definition, Err(ExecutionError::CyclicDependency));
+    }
+
+    #[test]
+    fn new_allows_a_valid_dag() {
         let dependency_id = WorkflowTaskId::new();
         let task_id = WorkflowTaskId::new();
 
-        let dependency = WorkflowTask::new(dependency_id, "validate".to_owned(), vec![]).unwrap();
-        let task =
-            WorkflowTask::new(task_id, "send_email".to_owned(), vec![dependency_id]).unwrap();
+        let definition = WorkflowDefinition::new(vec![
+            task(dependency_id, vec![]),
+            task(task_id, vec![dependency_id]),
+        ]);
 
-        let definition = WorkflowDefinition::new(vec![dependency, task]).unwrap();
-        assert_eq!(definition.tasks().len(), 2);
+        assert!(definition.is_ok());
+    }
+
+    #[test]
+    fn task_returns_the_matching_task() {
+        let id = WorkflowTaskId::new();
+        let definition = WorkflowDefinition::new(vec![task(id, vec![])]).unwrap();
+
+        assert_eq!(definition.task(id).unwrap().id(), id);
+    }
+
+    #[test]
+    fn task_returns_none_for_unknown_id() {
+        let definition = WorkflowDefinition::new(vec![]).unwrap();
+
+        assert!(definition.task(WorkflowTaskId::new()).is_none());
+    }
+
+    #[test]
+    fn validate_succeeds_for_well_formed_definition() {
+        let definition =
+            WorkflowDefinition::new(vec![task(WorkflowTaskId::new(), vec![])]).unwrap();
+
         assert!(definition.validate().is_ok());
     }
 
     #[test]
-    fn finds_task_by_id() {
-        let task_id = WorkflowTaskId::new();
-        let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
-
-        let definition = WorkflowDefinition::new(vec![task]).unwrap();
-        let found = definition.task(task_id).unwrap();
-
-        assert_eq!(found.id(), task_id);
-    }
-
-    #[test]
-    fn does_not_find_unknown_task_id() {
-        let task_id = WorkflowTaskId::new();
-        let unknown_task_id = WorkflowTaskId::new();
-
-        let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
-        let definition = WorkflowDefinition::new(vec![task]).unwrap();
-
-        assert!(definition.task(unknown_task_id).is_none());
-    }
-
-    #[test]
-    fn rejects_duplicate_task_id() {
+    fn workflow_definition_round_trips_through_json() {
+        let dependency_id = WorkflowTaskId::new();
         let task_id = WorkflowTaskId::new();
 
-        let first_task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
-        let second_task = WorkflowTask::new(task_id, "send_sms".to_owned(), vec![]).unwrap();
-
-        let definition = WorkflowDefinition::new(vec![first_task, second_task]);
-        assert_eq!(definition, Err(ExecutionError::DuplicateTaskId(task_id)));
-    }
-
-    #[test]
-    fn rejects_unknown_task_dependency() {
-        let unknown_task_id = WorkflowTaskId::new();
-
-        let task = WorkflowTask::new(
-            WorkflowTaskId::new(),
-            "send_email".to_owned(),
-            vec![unknown_task_id],
-        )
+        let definition = WorkflowDefinition::new(vec![
+            task(dependency_id, vec![]),
+            task(task_id, vec![dependency_id]),
+        ])
         .unwrap();
 
-        let definition = WorkflowDefinition::new(vec![task]);
-        assert!(matches!(definition, Err(ExecutionError::UnknownDependency)));
-    }
+        let json = serde_json::to_string(&definition).unwrap();
+        let deserialized: WorkflowDefinition = serde_json::from_str(&json).unwrap();
 
-    #[test]
-    fn rejects_cyclic_task_dependencies() {
-        let first_task_id = WorkflowTaskId::new();
-        let second_task_id = WorkflowTaskId::new();
-
-        let first_task =
-            WorkflowTask::new(first_task_id, "send_email".to_owned(), vec![second_task_id])
-                .unwrap();
-        let second_task =
-            WorkflowTask::new(second_task_id, "send_sms".to_owned(), vec![first_task_id]).unwrap();
-
-        let definition = WorkflowDefinition::new(vec![first_task, second_task]);
-        assert!(matches!(definition, Err(ExecutionError::CyclicDependency)));
-    }
-
-    #[test]
-    fn rejects_indirect_cyclic_task_dependencies() {
-        let first_task_id = WorkflowTaskId::new();
-        let second_task_id = WorkflowTaskId::new();
-        let third_task_id = WorkflowTaskId::new();
-
-        let first_task =
-            WorkflowTask::new(first_task_id, "send_email".to_owned(), vec![second_task_id])
-                .unwrap();
-        let second_task =
-            WorkflowTask::new(second_task_id, "send_sms".to_owned(), vec![third_task_id]).unwrap();
-        let third_task =
-            WorkflowTask::new(third_task_id, "send_mms".to_owned(), vec![first_task_id]).unwrap();
-
-        let definition = WorkflowDefinition::new(vec![first_task, second_task, third_task]);
-        assert!(matches!(definition, Err(ExecutionError::CyclicDependency)));
+        assert_eq!(definition, deserialized);
     }
 }
