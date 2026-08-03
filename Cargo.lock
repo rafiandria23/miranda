@@ -940,6 +940,11 @@ dependencies = [
 [[package]]
 name = "miranda-worker"
 version = "0.1.0"
+dependencies = [
+ "miranda-core",
+ "thiserror",
+ "tokio",
+]
 
 [[package]]
 name = "num-traits"
