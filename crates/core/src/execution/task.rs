@@ -132,19 +132,19 @@ impl Task {
         Ok(self.attempts.last().expect("attempt was just appended"))
     }
 
-    // Resets a task currently in `Running` back to `Pending` state.
-    //
-    // This is used during crash recovery when an execution is hydrated after
-    // a worker process crash while tasks were still in-flight.
-    pub fn reset_to_pending(&mut self) -> Result<(), ExecutionError> {
+    pub fn recover_from_abandonment(&mut self) -> Result<(), ExecutionError> {
         if self.status != TaskStatus::Running {
             return Err(ExecutionError::InvalidTaskTransition {
                 from: self.status,
-                to: TaskStatus::Pending,
+                to: TaskStatus::Failed,
             });
         }
 
-        self.status = TaskStatus::Pending;
+        if let Some(attempt) = self.latest_attempt_mut() {
+            attempt.fail()?;
+        }
+
+        self.transition_to(TaskStatus::Failed)?;
 
         Ok(())
     }
@@ -335,26 +335,30 @@ mod tests {
     }
 
     #[test]
-    fn reset_to_pending_resets_a_running_task() {
+    fn recover_from_abandonment_fails_a_running_task_and_its_latest_attempt() {
         let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
         task.start().unwrap();
 
-        task.reset_to_pending().unwrap();
+        task.recover_from_abandonment().unwrap();
 
-        assert_eq!(task.status(), TaskStatus::Pending);
+        assert_eq!(task.status(), TaskStatus::Failed);
+        assert_eq!(
+            task.latest_attempt().unwrap().status(),
+            AttemptStatus::Failed
+        );
     }
 
     #[test]
-    fn reset_to_pending_fails_when_task_is_not_running() {
+    fn recover_from_abandonment_fails_when_task_is_not_running() {
         let mut task = Task::new(ExecutionId::new(), WorkflowTaskId::new());
 
-        let err = task.reset_to_pending().unwrap_err();
+        let err = task.recover_from_abandonment().unwrap_err();
 
         assert_eq!(
             err,
             ExecutionError::InvalidTaskTransition {
                 from: TaskStatus::Pending,
-                to: TaskStatus::Pending,
+                to: TaskStatus::Failed,
             }
         );
     }

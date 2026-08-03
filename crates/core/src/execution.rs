@@ -276,31 +276,29 @@ impl Execution {
         )
     }
 
-    // Resets any tasks left in `Running` state back to `Pending` so they can be
-    // rescheduled after worker node failover or orchestrator crash recovery.
+    // Marks any tasks left in `Running` state as `Failed` so they can be
+    // retried after worker node failover or orchestrator crash recovery.
     pub fn recover_abandoned_tasks(
         &mut self,
         definition: &WorkflowDefinition,
     ) -> Result<usize, ExecutionError> {
-        // Phase 1: Identify tasks in Running state whose dependencies are fulfilled
         let tasks_to_recover: Vec<WorkflowTaskId> = self
             .tasks
             .iter()
-            .filter(|task| task.status() == TaskStatus::Running)
-            .filter_map(|task| {
+            .filter(|t| t.status() == TaskStatus::Running)
+            .filter_map(|t| {
                 definition
-                    .task(task.workflow_task_id())
-                    .filter(|workflow_task| self.are_task_dependencies_completed(workflow_task))
-                    .map(|workflow_task| workflow_task.id())
+                    .task(t.workflow_task_id())
+                    .filter(|wf_t| self.are_task_dependencies_completed(wf_t))
+                    .map(|wf_t| wf_t.id())
             })
             .collect();
 
         let recovered_count = tasks_to_recover.len();
 
-        // Phase 2: Mutate the collected tasks back to Pending
         for workflow_task_id in tasks_to_recover {
             if let Some(task) = self.task_mut(workflow_task_id) {
-                task.reset_to_pending()?;
+                task.recover_from_abandonment()?;
             }
         }
 
@@ -360,6 +358,7 @@ impl Execution {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::id::WorkflowTaskId;
 
     fn single_task_definition() -> (WorkflowDefinition, WorkflowTaskId) {
         let task_id = WorkflowTaskId::new();
@@ -383,7 +382,7 @@ mod tests {
     }
 
     #[test]
-    fn new_execution_starts_pending_with_no_tasks() {
+    fn new_starts_pending_with_no_tasks() {
         let workflow_version_id = WorkflowVersionId::new();
         let execution = Execution::new(workflow_version_id);
 
@@ -395,6 +394,7 @@ mod tests {
     #[test]
     fn from_definition_creates_a_task_per_workflow_task() {
         let (definition, task_id) = single_task_definition();
+
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
         assert_eq!(execution.tasks().len(), 1);
@@ -420,13 +420,13 @@ mod tests {
 
         let err = execution.start().unwrap_err();
 
-        assert!(matches!(
+        assert_eq!(
             err,
             ExecutionError::InvalidExecutionTransition {
                 from: ExecutionStatus::Running,
                 to: ExecutionStatus::Running,
             }
-        ));
+        );
     }
 
     #[test]
@@ -438,7 +438,7 @@ mod tests {
 
         let err = execution.complete().unwrap_err();
 
-        assert!(matches!(err, ExecutionError::IncompleteTasks));
+        assert_eq!(err, ExecutionError::IncompleteTasks);
         assert_eq!(execution.status(), ExecutionStatus::Running);
     }
 
@@ -454,6 +454,16 @@ mod tests {
         execution.complete().unwrap();
 
         assert_eq!(execution.status(), ExecutionStatus::Completed);
+    }
+
+    #[test]
+    fn fail_transitions_running_to_failed() {
+        let mut execution = Execution::new(WorkflowVersionId::new());
+        execution.start().unwrap();
+
+        execution.fail().unwrap();
+
+        assert_eq!(execution.status(), ExecutionStatus::Failed);
     }
 
     #[test]
@@ -488,13 +498,32 @@ mod tests {
     }
 
     #[test]
+    fn add_task_appends_a_pending_task_for_the_workflow_task() {
+        let mut execution = Execution::new(WorkflowVersionId::new());
+        let workflow_task_id = WorkflowTaskId::new();
+
+        execution.add_task(workflow_task_id).unwrap();
+
+        let task = execution.task(workflow_task_id).unwrap();
+        assert_eq!(task.execution_id(), execution.id());
+        assert_eq!(task.status(), TaskStatus::Pending);
+    }
+
+    #[test]
+    fn task_returns_none_for_unknown_workflow_task() {
+        let execution = Execution::new(WorkflowVersionId::new());
+
+        assert!(execution.task(WorkflowTaskId::new()).is_none());
+    }
+
+    #[test]
     fn ready_tasks_only_returns_tasks_whose_dependencies_are_completed() {
         let (definition, dependency_id, task_id) = chained_task_definition();
-        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+        let mut execution =
+            Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
         assert_eq!(execution.ready_tasks(&definition), vec![dependency_id]);
 
-        let mut execution = execution;
         execution.start().unwrap();
         execution.start_task(dependency_id, &definition).unwrap();
         execution.complete_task(dependency_id).unwrap();
@@ -510,7 +539,7 @@ mod tests {
 
         let err = execution.start_task(task_id, &definition).unwrap_err();
 
-        assert!(matches!(err, ExecutionError::ExecutionNotRunning));
+        assert_eq!(err, ExecutionError::ExecutionNotRunning);
     }
 
     #[test]
@@ -523,10 +552,7 @@ mod tests {
         let unknown_id = WorkflowTaskId::new();
         let err = execution.start_task(unknown_id, &definition).unwrap_err();
 
-        assert!(matches!(
-            err,
-            ExecutionError::UnknownWorkflowTask(id) if id == unknown_id
-        ));
+        assert_eq!(err, ExecutionError::UnknownWorkflowTask(unknown_id));
     }
 
     #[test]
@@ -538,10 +564,43 @@ mod tests {
 
         let err = execution.start_task(task_id, &definition).unwrap_err();
 
-        assert!(matches!(
-            err,
-            ExecutionError::TaskNotReady(id) if id == task_id
-        ));
+        assert_eq!(err, ExecutionError::TaskNotReady(task_id));
+    }
+
+    #[test]
+    fn complete_task_fails_for_unknown_task() {
+        let mut execution = Execution::new(WorkflowVersionId::new());
+
+        let unknown_id = WorkflowTaskId::new();
+        let err = execution.complete_task(unknown_id).unwrap_err();
+
+        assert_eq!(err, ExecutionError::UnknownTask(unknown_id));
+    }
+
+    #[test]
+    fn fail_task_transitions_running_task_to_failed() {
+        let (definition, task_id) = single_task_definition();
+        let mut execution =
+            Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+        execution.start().unwrap();
+        execution.start_task(task_id, &definition).unwrap();
+
+        execution.fail_task(task_id).unwrap();
+
+        assert_eq!(
+            execution.task(task_id).unwrap().status(),
+            TaskStatus::Failed
+        );
+    }
+
+    #[test]
+    fn cancel_task_fails_for_unknown_task() {
+        let mut execution = Execution::new(WorkflowVersionId::new());
+
+        let unknown_id = WorkflowTaskId::new();
+        let err = execution.cancel_task(unknown_id).unwrap_err();
+
+        assert_eq!(err, ExecutionError::UnknownTask(unknown_id));
     }
 
     #[test]
@@ -552,7 +611,7 @@ mod tests {
 
         let err = execution.retry_task(task_id, &definition).unwrap_err();
 
-        assert!(matches!(err, ExecutionError::ExecutionNotRunning));
+        assert_eq!(err, ExecutionError::ExecutionNotRunning);
     }
 
     #[test]
@@ -564,10 +623,26 @@ mod tests {
 
         let err = execution.retry_task(task_id, &definition).unwrap_err();
 
-        assert!(matches!(
-            err,
-            ExecutionError::TaskNotRetryable(id) if id == task_id
-        ));
+        assert_eq!(err, ExecutionError::TaskNotRetryable(task_id));
+    }
+
+    #[test]
+    fn retry_task_requires_dependencies_to_be_completed() {
+        let (definition, _dependency_id, task_id) = chained_task_definition();
+        let mut execution =
+            Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+        execution.start().unwrap();
+
+        // Force `task_id` into `Failed` without completing its dependency, by
+        // driving the task directly rather than through `execution.start_task`,
+        // which would otherwise refuse this transition via `is_task_ready`.
+        let task = execution.task_mut(task_id).unwrap();
+        task.start().unwrap();
+        task.fail().unwrap();
+
+        let err = execution.retry_task(task_id, &definition).unwrap_err();
+
+        assert_eq!(err, ExecutionError::TaskNotReady(task_id));
     }
 
     #[test]
@@ -589,19 +664,6 @@ mod tests {
     }
 
     #[test]
-    fn complete_task_fails_for_unknown_task() {
-        let mut execution = Execution::new(WorkflowVersionId::new());
-
-        let unknown_id = WorkflowTaskId::new();
-        let err = execution.complete_task(unknown_id).unwrap_err();
-
-        assert!(matches!(
-            err,
-            ExecutionError::UnknownTask(id) if id == unknown_id
-        ));
-    }
-
-    #[test]
     fn is_finished_is_true_only_for_terminal_statuses() {
         let mut execution = Execution::new(WorkflowVersionId::new());
         assert!(!execution.is_finished());
@@ -614,7 +676,7 @@ mod tests {
     }
 
     #[test]
-    fn recover_abandoned_tasks_resets_running_tasks_with_completed_dependencies() {
+    fn recover_abandoned_tasks_fails_running_tasks_with_completed_dependencies() {
         let (definition, dependency_id, task_id) = chained_task_definition();
         let mut execution =
             Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
@@ -634,7 +696,7 @@ mod tests {
         assert_eq!(recovered, 1);
         assert_eq!(
             execution.task(task_id).unwrap().status(),
-            TaskStatus::Pending
+            TaskStatus::Failed
         );
     }
 
@@ -747,14 +809,30 @@ mod tests {
     }
 
     #[test]
-    fn add_task_appends_a_pending_task_for_the_workflow_task() {
+    fn apply_invalid_transition_fails() {
+        let definition = WorkflowDefinition::new(vec![]).unwrap();
         let mut execution = Execution::new(WorkflowVersionId::new());
-        let workflow_task_id = WorkflowTaskId::new();
 
-        execution.add_task(workflow_task_id).unwrap();
+        let event = Event::new(execution.id(), EventPayload::ExecutionCompleted);
+        let err = execution.apply(event, &definition).unwrap_err();
 
-        let task = execution.task(workflow_task_id).unwrap();
-        assert_eq!(task.execution_id(), execution.id());
-        assert_eq!(task.status(), TaskStatus::Pending);
+        assert!(matches!(
+            err,
+            ExecutionError::InvalidExecutionTransition { .. }
+        ));
+    }
+
+    #[test]
+    fn execution_round_trips_through_json() {
+        let (definition, task_id) = single_task_definition();
+        let mut execution =
+            Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+        execution.start().unwrap();
+        execution.start_task(task_id, &definition).unwrap();
+
+        let json = serde_json::to_string(&execution).unwrap();
+        let deserialized: Execution = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(execution, deserialized);
     }
 }
