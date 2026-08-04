@@ -234,9 +234,11 @@ where
 
     pub async fn heartbeat(
         &self,
-        _worker_id: WorkerId,
+        worker_id: WorkerId,
         active_leases: &[String],
     ) -> Result<(), ControlPlaneError> {
+        self.router.touch(worker_id).await?;
+
         for token_str in active_leases {
             let token = LeaseToken(token_str.clone());
             let _ = self.leases.renew(&token).await;

@@ -27,6 +27,11 @@ pub trait Router: Send + Sync {
         worker_id: WorkerId,
     ) -> impl Future<Output = Result<(), ControlPlaneError>> + Send;
 
+    fn touch(
+        &self,
+        worker_id: WorkerId,
+    ) -> impl Future<Output = Result<(), ControlPlaneError>> + Send;
+
     fn select_worker(&self, task_type: &str) -> impl Future<Output = Option<WorkerId>> + Send;
 }
 
@@ -48,7 +53,6 @@ impl InMemoryRouter {
 impl Router for InMemoryRouter {
     async fn register(&self, worker: WorkerInfo) -> Result<(), ControlPlaneError> {
         let mut workers = self.workers.write().await;
-
         workers.insert(worker.id, worker);
 
         Ok(())
@@ -56,8 +60,17 @@ impl Router for InMemoryRouter {
 
     async fn deregister(&self, worker_id: WorkerId) -> Result<(), ControlPlaneError> {
         let mut workers = self.workers.write().await;
-
         workers.remove(&worker_id);
+
+        Ok(())
+    }
+
+    async fn touch(&self, worker_id: WorkerId) -> Result<(), ControlPlaneError> {
+        let mut workers = self.workers.write().await;
+
+        if let Some(info) = workers.get_mut(&worker_id) {
+            info.last_heartbeat = Instant::now();
+        }
 
         Ok(())
     }
