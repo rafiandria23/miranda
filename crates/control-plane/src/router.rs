@@ -3,11 +3,13 @@ use std::{
     collections::{HashMap, HashSet},
     future::Future,
     sync::Arc,
-    time::Instant,
+    time::{Duration, Instant},
 };
 use tokio::sync::RwLock;
 
 use crate::ControlPlaneError;
+
+pub const DEFAULT_WORKER_STALENESS_THRESHOLD: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone)]
 pub struct WorkerInfo {
@@ -33,6 +35,11 @@ pub trait Router: Send + Sync {
     ) -> impl Future<Output = Result<(), ControlPlaneError>> + Send;
 
     fn select_worker(&self, task_type: &str) -> impl Future<Output = Option<WorkerId>> + Send;
+
+    fn reap_stale(
+        &self,
+        staleness_threshold: Duration,
+    ) -> impl Future<Output = Vec<WorkerInfo>> + Send;
 }
 
 // =========================================================================
@@ -82,6 +89,22 @@ impl Router for InMemoryRouter {
             .values()
             .find(|w| w.capabilities.contains(task_type))
             .map(|w| w.id)
+    }
+
+    async fn reap_stale(&self, staleness_threshold: Duration) -> Vec<WorkerInfo> {
+        let mut workers = self.workers.write().await;
+        let now = Instant::now();
+
+        let stale_ids: Vec<WorkerId> = workers
+            .iter()
+            .filter(|(_, info)| now.duration_since(info.last_heartbeat) > staleness_threshold)
+            .map(|(id, _)| *id)
+            .collect();
+
+        stale_ids
+            .into_iter()
+            .filter_map(|id| workers.remove(&id))
+            .collect()
     }
 }
 
@@ -186,5 +209,47 @@ mod tests {
         let selected = router.select_worker("default").await.unwrap();
 
         assert!(ids.contains(&selected));
+    }
+
+    #[tokio::test]
+    async fn reap_stale_removes_workers_past_the_staleness_threshold() {
+        let router = InMemoryRouter::new();
+        let worker = WorkerInfo {
+            id: WorkerId::new(),
+            capabilities: ["default"].iter().map(|c| c.to_string()).collect(),
+            last_heartbeat: Instant::now() - Duration::from_secs(60),
+        };
+        let worker_id = worker.id;
+
+        router.register(worker).await.unwrap();
+
+        let reaped = router.reap_stale(Duration::from_secs(30)).await;
+
+        assert_eq!(reaped.len(), 1);
+        assert_eq!(reaped[0].id, worker_id);
+        assert!(router.select_worker("default").await.is_none());
+    }
+
+    #[tokio::test]
+    async fn reap_stale_leaves_workers_within_the_staleness_threshold() {
+        let router = InMemoryRouter::new();
+        let worker = worker_with_capabilities(&["default"]);
+        let worker_id = worker.id;
+
+        router.register(worker).await.unwrap();
+
+        let reaped = router.reap_stale(Duration::from_secs(30)).await;
+
+        assert!(reaped.is_empty());
+        assert_eq!(router.select_worker("default").await, Some(worker_id));
+    }
+
+    #[tokio::test]
+    async fn reap_stale_returns_empty_when_no_workers_registered() {
+        let router = InMemoryRouter::new();
+
+        let reaped = router.reap_stale(Duration::from_secs(30)).await;
+
+        assert!(reaped.is_empty());
     }
 }

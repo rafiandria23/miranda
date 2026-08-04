@@ -17,7 +17,7 @@ use crate::{
     ControlPlaneError,
     lease_manager::{DEFAULT_LEASE_TTL, LeaseManager, LeaseToken},
     queue::{QueueItem, TaskQueue},
-    router::{Router, WorkerInfo},
+    router::{DEFAULT_WORKER_STALENESS_THRESHOLD, Router, WorkerInfo},
 };
 
 pub struct ControlPlane<Q, R, S> {
@@ -27,6 +27,7 @@ pub struct ControlPlane<Q, R, S> {
     leases: LeaseManager,
     retry_policy: RetryPolicy,
     lease_ttl: Duration,
+    worker_staleness_threshold: Duration,
 }
 
 impl<Q, R, S> ControlPlane<Q, R, S>
@@ -43,6 +44,7 @@ where
             leases: LeaseManager::new(),
             retry_policy: RetryPolicy::default(),
             lease_ttl: DEFAULT_LEASE_TTL,
+            worker_staleness_threshold: DEFAULT_WORKER_STALENESS_THRESHOLD,
         }
     }
 
@@ -53,6 +55,11 @@ where
 
     pub fn with_lease_ttl(mut self, lease_ttl: Duration) -> Self {
         self.lease_ttl = lease_ttl;
+        self
+    }
+
+    pub fn with_worker_staleness_threshold(mut self, worker_staleness_threshold: Duration) -> Self {
+        self.worker_staleness_threshold = worker_staleness_threshold;
         self
     }
 
@@ -308,6 +315,15 @@ where
         }
 
         Ok(recovered_count)
+    }
+
+    pub async fn reap_stale_workers(&self) -> Result<usize, ControlPlaneError> {
+        let stale = self
+            .router
+            .reap_stale(self.worker_staleness_threshold)
+            .await;
+
+        Ok(stale.len())
     }
 }
 
@@ -765,5 +781,98 @@ mod tests {
             ControlPlane::new(queue, router, store).with_lease_ttl(Duration::from_secs(5));
 
         assert_eq!(control_plane.lease_ttl, Duration::from_secs(5));
+    }
+
+    #[tokio::test]
+    async fn with_worker_staleness_threshold_overrides_default() {
+        let queue = InMemoryTaskQueue::new();
+        let router = InMemoryRouter::new();
+        let store = MemoryStore::new();
+
+        let control_plane = ControlPlane::new(queue, router, store)
+            .with_worker_staleness_threshold(Duration::from_secs(5));
+
+        assert_eq!(
+            control_plane.worker_staleness_threshold,
+            Duration::from_secs(5)
+        );
+    }
+
+    #[tokio::test]
+    async fn reap_expired_leases_returns_zero_when_no_leases_exist() {
+        let (control_plane, _queue, _router, _store) = harness();
+
+        let recovered = control_plane.reap_expired_leases().await.unwrap();
+
+        assert_eq!(recovered, 0);
+    }
+
+    #[tokio::test]
+    async fn reap_expired_leases_fails_and_requeues_abandoned_running_tasks() {
+        let queue = InMemoryTaskQueue::new();
+        let store = MemoryStore::new();
+        let control_plane = ControlPlane::new(queue.clone(), InMemoryRouter::new(), store.clone())
+            .with_lease_ttl(Duration::ZERO);
+
+        let (definition, task_id) = single_task_definition();
+        let workflow_version_id = WorkflowVersionId::new();
+        let execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        let execution_id = execution.id();
+
+        save_definition(&store, workflow_version_id, &definition).await;
+        control_plane
+            .submit_execution(execution, definition)
+            .await
+            .unwrap();
+
+        // Zero lease TTL means the lease issued here is immediately expired.
+        control_plane.poll_task(WorkerId::new()).await.unwrap();
+
+        tokio::time::sleep(Duration::from_millis(5)).await;
+
+        let recovered = control_plane.reap_expired_leases().await.unwrap();
+
+        assert_eq!(recovered, 1);
+
+        let (stored, _version) = store.get_execution(execution_id).await.unwrap();
+        assert_eq!(stored.task(task_id).unwrap().status(), TaskStatus::Failed);
+
+        let requeued = queue.dequeue().await.unwrap();
+        assert!(
+            requeued.is_some(),
+            "the recovered task should be requeued for a retry"
+        );
+    }
+
+    #[tokio::test]
+    async fn reap_stale_workers_returns_zero_when_no_workers_are_stale() {
+        let (control_plane, _queue, _router, _store) = harness();
+
+        let reaped = control_plane.reap_stale_workers().await.unwrap();
+
+        assert_eq!(reaped, 0);
+    }
+
+    #[tokio::test]
+    async fn reap_stale_workers_removes_workers_past_the_staleness_threshold() {
+        let queue = InMemoryTaskQueue::new();
+        let router = InMemoryRouter::new();
+        let store = MemoryStore::new();
+
+        let control_plane = ControlPlane::new(queue, router.clone(), store)
+            .with_worker_staleness_threshold(Duration::ZERO);
+        let worker_id = WorkerId::new();
+
+        control_plane
+            .register_worker(worker_id, vec!["send_email".to_string()])
+            .await
+            .unwrap();
+
+        tokio::time::sleep(Duration::from_millis(5)).await;
+
+        let reaped = control_plane.reap_stale_workers().await.unwrap();
+
+        assert_eq!(reaped, 1);
+        assert_eq!(router.select_worker("send_email").await, None);
     }
 }

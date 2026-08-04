@@ -8,4 +8,3 @@ pub mod router;
 
 pub use control_plane::ControlPlane;
 pub use error::ControlPlaneError;
-pub use lease_manager::{DEFAULT_LEASE_TTL, Lease, LeaseManager, LeaseToken};
