@@ -103,7 +103,10 @@ where
                         execution.apply(
                             Event::new(
                                 execution.id(),
-                                EventPayload::TaskFailed { workflow_task_id },
+                                EventPayload::TaskFailed {
+                                    workflow_task_id,
+                                    reason: worker_error.to_string(),
+                                },
                             ),
                             definition,
                         )?;
@@ -132,7 +135,12 @@ where
                             error!(task_id = %workflow_task_id, "max retries exceeded");
 
                             execution.apply(
-                                Event::new(execution.id(), EventPayload::ExecutionFailed),
+                                Event::new(
+                                    execution.id(),
+                                    EventPayload::ExecutionFailed {
+                                        reason: worker_error.to_string(),
+                                    },
+                                ),
                                 definition,
                             )?;
 

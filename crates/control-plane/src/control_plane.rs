@@ -183,6 +183,7 @@ where
                         execution.id(),
                         EventPayload::TaskFailed {
                             workflow_task_id: lease.workflow_task_id,
+                            reason: worker_error.to_string(),
                         },
                     ),
                     &definition,
@@ -225,13 +226,16 @@ where
                         self.store.get_execution(lease.execution_id).await?;
 
                     execution.apply(
-                        Event::new(execution.id(), EventPayload::ExecutionFailed),
+                        Event::new(
+                            execution.id(),
+                            EventPayload::ExecutionFailed {
+                                reason: worker_error.to_string(),
+                            },
+                        ),
                         &definition,
                     )?;
                     self.store.update_execution(&execution, version).await?;
                     self.leases.release(&token).await?;
-
-                    let _ = worker_error;
                 }
             }
         }

@@ -50,7 +50,9 @@ pub enum EventPayload {
     ExecutionCreated,
     ExecutionStarted,
     ExecutionCompleted,
-    ExecutionFailed,
+    ExecutionFailed {
+        reason: String,
+    },
     ExecutionCancelled,
     ExecutionTerminated,
 
@@ -66,6 +68,7 @@ pub enum EventPayload {
     },
     TaskFailed {
         workflow_task_id: WorkflowTaskId,
+        reason: String,
     },
     TaskCancelled {
         workflow_task_id: WorkflowTaskId,
@@ -91,6 +94,7 @@ pub enum EventPayload {
     AttemptFailed {
         task_id: TaskId,
         attempt_id: AttemptId,
+        reason: String,
     },
     AttemptCancelled {
         task_id: TaskId,
@@ -155,7 +159,9 @@ mod tests {
         );
         assert_ne!(
             EventPayload::ExecutionStarted,
-            EventPayload::ExecutionFailed
+            EventPayload::ExecutionFailed {
+                reason: "boom".to_string()
+            }
         );
     }
 
@@ -176,7 +182,10 @@ mod tests {
         );
         assert_ne!(
             EventPayload::TaskCompleted { workflow_task_id },
-            EventPayload::TaskFailed { workflow_task_id }
+            EventPayload::TaskFailed {
+                workflow_task_id,
+                reason: "boom".to_string()
+            }
         );
     }
 

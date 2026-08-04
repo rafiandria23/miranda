@@ -318,7 +318,7 @@ impl Execution {
             // Execution lifecycle
             EventPayload::ExecutionStarted => self.start()?,
             EventPayload::ExecutionCompleted => self.complete()?,
-            EventPayload::ExecutionFailed => self.fail()?,
+            EventPayload::ExecutionFailed { .. } => self.fail()?,
             EventPayload::ExecutionCancelled => self.cancel()?,
             EventPayload::ExecutionTerminated => self.terminate()?,
 
@@ -329,7 +329,7 @@ impl Execution {
             EventPayload::TaskCompleted { workflow_task_id } => {
                 self.complete_task(*workflow_task_id)?;
             }
-            EventPayload::TaskFailed { workflow_task_id } => {
+            EventPayload::TaskFailed { workflow_task_id, .. } => {
                 self.fail_task(*workflow_task_id)?;
             }
             EventPayload::TaskCancelled { workflow_task_id } => {
