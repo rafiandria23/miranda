@@ -36,6 +36,12 @@ pub trait Router: Send + Sync {
 
     fn select_worker(&self, task_type: &str) -> impl Future<Output = Option<WorkerId>> + Send;
 
+    fn worker_satisfies(
+        &self,
+        worker_id: WorkerId,
+        task_type: &str,
+    ) -> impl Future<Output = bool> + Send;
+
     fn reap_stale(
         &self,
         staleness_threshold: Duration,
@@ -89,6 +95,14 @@ impl Router for InMemoryRouter {
             .values()
             .find(|w| w.capabilities.contains(task_type))
             .map(|w| w.id)
+    }
+
+    async fn worker_satisfies(&self, worker_id: WorkerId, task_type: &str) -> bool {
+        let workers = self.workers.read().await;
+
+        workers
+            .get(&worker_id)
+            .is_some_and(|info| info.capabilities.contains(task_type))
     }
 
     async fn reap_stale(&self, staleness_threshold: Duration) -> Vec<WorkerInfo> {
