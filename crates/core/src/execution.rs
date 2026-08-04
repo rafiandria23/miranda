@@ -281,7 +281,7 @@ impl Execution {
     pub fn recover_abandoned_tasks(
         &mut self,
         definition: &WorkflowDefinition,
-    ) -> Result<usize, ExecutionError> {
+    ) -> Result<Vec<WorkflowTaskId>, ExecutionError> {
         let tasks_to_recover: Vec<WorkflowTaskId> = self
             .tasks
             .iter()
@@ -294,15 +294,13 @@ impl Execution {
             })
             .collect();
 
-        let recovered_count = tasks_to_recover.len();
-
-        for workflow_task_id in tasks_to_recover {
-            if let Some(task) = self.task_mut(workflow_task_id) {
+        for workflow_task_id in &tasks_to_recover {
+            if let Some(task) = self.task_mut(*workflow_task_id) {
                 task.recover_from_abandonment()?;
             }
         }
 
-        Ok(recovered_count)
+        Ok(tasks_to_recover)
     }
 
     pub fn apply(
@@ -693,7 +691,7 @@ mod tests {
 
         let recovered = execution.recover_abandoned_tasks(&definition).unwrap();
 
-        assert_eq!(recovered, 1);
+        assert_eq!(recovered, vec![task_id]);
         assert_eq!(
             execution.task(task_id).unwrap().status(),
             TaskStatus::Failed
@@ -714,7 +712,7 @@ mod tests {
 
         let recovered = execution.recover_abandoned_tasks(&definition).unwrap();
 
-        assert_eq!(recovered, 0);
+        assert!(recovered.is_empty());
         assert_eq!(
             execution.task(task_id).unwrap().status(),
             TaskStatus::Running

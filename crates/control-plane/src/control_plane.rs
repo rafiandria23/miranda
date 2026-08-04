@@ -1,13 +1,14 @@
 use miranda_core::{
     event::{Event, EventPayload},
     execution::{Execution, TaskStatus},
-    id::WorkerId,
+    id::{ExecutionId, WorkerId, WorkflowTaskId},
     workflow::WorkflowDefinition,
 };
 use miranda_scheduler::RetryPolicy;
 use miranda_storage::WorkflowStore;
 use miranda_worker::dispatcher::TaskAssignment;
 use std::{
+    collections::HashMap,
     sync::Arc,
     time::{Duration, Instant},
 };
@@ -260,6 +261,51 @@ where
 
     pub async fn deregister_worker(&self, worker_id: WorkerId) -> Result<(), ControlPlaneError> {
         self.router.deregister(worker_id).await
+    }
+
+    pub async fn reap_expired_leases(&self) -> Result<usize, ControlPlaneError> {
+        let expired = self.leases.reap_expired().await;
+
+        if expired.is_empty() {
+            return Ok(0);
+        }
+
+        let mut by_execution: HashMap<ExecutionId, Vec<WorkflowTaskId>> = HashMap::new();
+
+        for lease in &expired {
+            by_execution
+                .entry(lease.execution_id)
+                .or_default()
+                .push(lease.workflow_task_id);
+        }
+
+        let mut recovered_count = 0;
+
+        for (execution_id, _leased_task_ids) in by_execution {
+            let (mut execution, version) = self.store.get_execution(execution_id).await?;
+            let definition = Arc::new(
+                self.store
+                    .get_definition(execution.workflow_version_id())
+                    .await?,
+            );
+
+            let recovered_ids = execution.recover_abandoned_tasks(&definition)?;
+            recovered_count += recovered_ids.len();
+
+            self.store.update_execution(&execution, version).await?;
+
+            for workflow_task_id in recovered_ids {
+                self.queue
+                    .enqueue(QueueItem {
+                        execution_id,
+                        workflow_task_id,
+                        definition: definition.clone(),
+                    })
+                    .await?;
+            }
+        }
+
+        Ok(recovered_count)
     }
 }
 

@@ -131,7 +131,7 @@ impl LeaseManager {
             .collect()
     }
 
-    pub async fn cleanup(&self) {
+    pub async fn reap_expired(&self) -> Vec<Lease> {
         let mut leases = self.leases.write().await;
         let expired: Vec<LeaseToken> = leases
             .iter()
@@ -139,9 +139,10 @@ impl LeaseManager {
             .map(|(t, _)| t.clone())
             .collect();
 
-        for token in expired {
-            leases.remove(&token);
-        }
+        expired
+            .into_iter()
+            .filter_map(|t| leases.remove(&t))
+            .collect()
     }
 }
 
@@ -224,10 +225,7 @@ mod tests {
             .create(execution_id, task_id, worker_id, DEFAULT_LEASE_TTL)
             .await;
 
-        let err = manager
-            .validate(&token, other_worker_id)
-            .await
-            .unwrap_err();
+        let err = manager.validate(&token, other_worker_id).await.unwrap_err();
 
         assert!(matches!(err, ControlPlaneError::InvalidRequest(_)));
     }
@@ -352,7 +350,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cleanup_removes_only_expired_leases() {
+    async fn reap_expired_removes_only_expired_leases() {
         let manager = LeaseManager::new();
         let (execution_id, task_id, worker_id) = ids();
 
@@ -364,7 +362,10 @@ mod tests {
             .await;
 
         tokio::time::sleep(Duration::from_millis(5)).await;
-        manager.cleanup().await;
+        let reaped = manager.reap_expired().await;
+
+        assert_eq!(reaped.len(), 1);
+        assert_eq!(reaped[0].token, expired_token);
 
         assert!(manager.validate(&active_token, worker_id).await.is_ok());
         assert!(matches!(
