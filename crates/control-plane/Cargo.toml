@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 miranda-core = { path = "../core" }
-miranda-scheduler = { path = "../scheduler" }
+miranda-engine = { path = "../engine" }
 miranda-storage = { path = "../storage" }
 miranda-worker = { path = "../worker" }
 

@@ -4,7 +4,7 @@ use miranda_core::{
     id::{ExecutionId, WorkerId, WorkflowTaskId},
     workflow::WorkflowDefinition,
 };
-use miranda_scheduler::RetryPolicy;
+use miranda_engine::{EngineError, retry::RetryPolicy, task_runner::TaskOutcome};
 use miranda_storage::WorkflowStore;
 use miranda_worker::dispatcher::TaskAssignment;
 use std::{
@@ -163,60 +163,20 @@ where
                 .await?,
         );
 
-        match result {
+        let outcome = TaskOutcome::new(&self.retry_policy);
+
+        match outcome
+            .apply(&mut execution, &definition, lease.workflow_task_id, result)
+            .await
+        {
             Ok(()) => {
-                execution.apply(
-                    Event::new(
-                        execution.id(),
-                        EventPayload::TaskCompleted {
-                            workflow_task_id: lease.workflow_task_id,
-                        },
-                    ),
-                    &definition,
-                )?;
                 self.store.update_execution(&execution, version).await?;
                 self.leases.release(&token).await?;
-            }
-            Err(worker_error) => {
-                let attempt_count = execution
-                    .task(lease.workflow_task_id)
-                    .map(|task| task.attempts().len() as u32)
-                    .unwrap_or(0);
-                let will_retry = self.retry_policy.should_retry(attempt_count);
 
-                execution.apply(
-                    Event::new(
-                        execution.id(),
-                        EventPayload::TaskFailed {
-                            workflow_task_id: lease.workflow_task_id,
-                            reason: worker_error.to_string(),
-                            will_retry,
-                        },
-                    ),
-                    &definition,
-                )?;
-
-                self.store.update_execution(&execution, version).await?;
-
-                if will_retry {
-                    let delay = self.retry_policy.delay_for_attempt(attempt_count + 1);
-                    miranda_scheduler::delay(delay).await;
-
-                    let (mut execution, version) =
-                        self.store.get_execution(lease.execution_id).await?;
-
-                    execution.apply(
-                        Event::new(
-                            execution.id(),
-                            EventPayload::TaskRetried {
-                                workflow_task_id: lease.workflow_task_id,
-                            },
-                        ),
-                        &definition,
-                    )?;
-                    self.store.update_execution(&execution, version).await?;
-                    self.leases.release(&token).await?;
-
+                if execution.task(lease.workflow_task_id).map(|t| t.status())
+                    == Some(TaskStatus::Running)
+                {
+                    // Was retried — needs to go back through dispatch.
                     self.queue
                         .enqueue(QueueItem {
                             execution_id: lease.execution_id,
@@ -224,22 +184,16 @@ where
                             definition,
                         })
                         .await?;
-                } else {
-                    let (mut execution, version) =
-                        self.store.get_execution(lease.execution_id).await?;
-
-                    execution.apply(
-                        Event::new(
-                            execution.id(),
-                            EventPayload::ExecutionFailed {
-                                reason: worker_error.to_string(),
-                            },
-                        ),
-                        &definition,
-                    )?;
-                    self.store.update_execution(&execution, version).await?;
-                    self.leases.release(&token).await?;
                 }
+            }
+
+            Err(EngineError::ExecutionFailed(_)) => {
+                self.store.update_execution(&execution, version).await?;
+                self.leases.release(&token).await?;
+            }
+
+            Err(other) => {
+                return Err(ControlPlaneError::from(other));
             }
         }
 
@@ -338,7 +292,7 @@ where
 mod tests {
     use super::*;
     use miranda_core::{execution::ExecutionStatus, id::WorkflowVersionId, workflow::WorkflowTask};
-    use miranda_scheduler::Backoff;
+    use miranda_engine::retry::Backoff;
     use miranda_storage::MemoryStore;
 
     use crate::{queue::InMemoryTaskQueue, router::InMemoryRouter};

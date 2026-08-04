@@ -876,7 +876,7 @@ name = "miranda-control-plane"
 version = "0.1.0"
 dependencies = [
  "miranda-core",
- "miranda-scheduler",
+ "miranda-engine",
  "miranda-storage",
  "miranda-worker",
  "thiserror",
@@ -904,13 +904,6 @@ dependencies = [
  "thiserror",
  "tokio",
  "tracing",
-]
-
-[[package]]
-name = "miranda-scheduler"
-version = "0.1.0"
-dependencies = [
- "tokio",
 ]
 
 [[package]]

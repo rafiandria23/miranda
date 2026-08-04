@@ -1,4 +1,5 @@
 use miranda_core::{ExecutionError, id::WorkerId};
+use miranda_engine::EngineError;
 use miranda_storage::StorageError;
 use thiserror::Error;
 
@@ -9,6 +10,9 @@ pub enum ControlPlaneError {
 
     #[error(transparent)]
     Storage(#[from] StorageError),
+
+    #[error(transparent)]
+    Engine(#[from] EngineError),
 
     #[error("worker not found: {0}")]
     WorkerNotFound(WorkerId),
