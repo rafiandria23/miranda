@@ -53,6 +53,12 @@ where
 // Task Outcome Implementation
 // =========================================================================
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskOutcomeResult {
+    Completed,
+    Retried,
+}
+
 pub struct TaskOutcome<'a> {
     retry_policy: &'a RetryPolicy,
 }
@@ -68,7 +74,7 @@ impl<'a> TaskOutcome<'a> {
         definition: &WorkflowDefinition,
         workflow_task_id: WorkflowTaskId,
         result: Result<(), WorkerError>,
-    ) -> Result<(), EngineError> {
+    ) -> Result<TaskOutcomeResult, EngineError> {
         match result {
             Ok(()) => {
                 debug!(task_id = %workflow_task_id, "task completed");
@@ -81,7 +87,7 @@ impl<'a> TaskOutcome<'a> {
                     definition,
                 )?;
 
-                Ok(())
+                Ok(TaskOutcomeResult::Completed)
             }
 
             Err(worker_error) => {
@@ -114,7 +120,6 @@ impl<'a> TaskOutcome<'a> {
                         delay_ms = %delay_duration.as_millis(),
                         "retrying task"
                     );
-
                     delay(delay_duration).await;
 
                     execution.apply(
@@ -125,7 +130,7 @@ impl<'a> TaskOutcome<'a> {
                         definition,
                     )?;
 
-                    Ok(())
+                    Ok(TaskOutcomeResult::Retried)
                 } else {
                     error!(task_id = %workflow_task_id, "max retries exceeded");
 

@@ -4,7 +4,11 @@ use miranda_core::{
     id::{ExecutionId, WorkerId, WorkflowTaskId},
     workflow::WorkflowDefinition,
 };
-use miranda_engine::{EngineError, retry::RetryPolicy, task_runner::TaskOutcome};
+use miranda_engine::{
+    EngineError,
+    retry::RetryPolicy,
+    task_runner::{TaskOutcome, TaskOutcomeResult},
+};
 use miranda_storage::WorkflowStore;
 use miranda_worker::dispatcher::TaskAssignment;
 use std::{
@@ -169,22 +173,22 @@ where
             .apply(&mut execution, &definition, lease.workflow_task_id, result)
             .await
         {
-            Ok(()) => {
+            Ok(TaskOutcomeResult::Completed) => {
+                self.store.update_execution(&execution, version).await?;
+                self.leases.release(&token).await?;
+            }
+
+            Ok(TaskOutcomeResult::Retried) => {
                 self.store.update_execution(&execution, version).await?;
                 self.leases.release(&token).await?;
 
-                if execution.task(lease.workflow_task_id).map(|t| t.status())
-                    == Some(TaskStatus::Running)
-                {
-                    // Was retried — needs to go back through dispatch.
-                    self.queue
-                        .enqueue(QueueItem {
-                            execution_id: lease.execution_id,
-                            workflow_task_id: lease.workflow_task_id,
-                            definition,
-                        })
-                        .await?;
-                }
+                self.queue
+                    .enqueue(QueueItem {
+                        execution_id: lease.execution_id,
+                        workflow_task_id: lease.workflow_task_id,
+                        definition,
+                    })
+                    .await?;
             }
 
             Err(EngineError::ExecutionFailed(_)) => {
