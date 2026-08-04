@@ -100,28 +100,32 @@ where
                     Err(worker_error) => {
                         warn!(task_id = %workflow_task_id, error = %worker_error, "task failed");
 
+                        let task = execution.task(workflow_task_id).expect("task must exist");
+                        let attempt_count = task.attempts().len() as u32;
+                        let will_retry = self.retry_policy.should_retry(attempt_count);
+
                         execution.apply(
                             Event::new(
                                 execution.id(),
                                 EventPayload::TaskFailed {
                                     workflow_task_id,
                                     reason: worker_error.to_string(),
+                                    will_retry,
                                 },
                             ),
                             definition,
                         )?;
 
-                        let task = execution.task(workflow_task_id).expect("task must exist");
-                        let attempt_count = task.attempts().len() as u32;
-
-                        if self.retry_policy.should_retry(attempt_count) {
+                        if will_retry {
                             let delay = self.retry_policy.delay_for_attempt(attempt_count + 1);
+
                             info!(
                                 task_id = %workflow_task_id,
                                 attempt = attempt_count + 1,
                                 delay_ms = %delay.as_millis(),
                                 "retrying task"
                             );
+
                             miranda_scheduler::delay(delay).await;
 
                             execution.apply(

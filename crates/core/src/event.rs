@@ -69,6 +69,7 @@ pub enum EventPayload {
     TaskFailed {
         workflow_task_id: WorkflowTaskId,
         reason: String,
+        will_retry: bool,
     },
     TaskCancelled {
         workflow_task_id: WorkflowTaskId,
@@ -184,7 +185,8 @@ mod tests {
             EventPayload::TaskCompleted { workflow_task_id },
             EventPayload::TaskFailed {
                 workflow_task_id,
-                reason: "boom".to_string()
+                reason: "boom".to_string(),
+                will_retry: false
             }
         );
     }

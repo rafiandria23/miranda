@@ -178,24 +178,27 @@ where
                 self.leases.release(&token).await?;
             }
             Err(worker_error) => {
+                let attempt_count = execution
+                    .task(lease.workflow_task_id)
+                    .map(|task| task.attempts().len() as u32)
+                    .unwrap_or(0);
+                let will_retry = self.retry_policy.should_retry(attempt_count);
+
                 execution.apply(
                     Event::new(
                         execution.id(),
                         EventPayload::TaskFailed {
                             workflow_task_id: lease.workflow_task_id,
                             reason: worker_error.to_string(),
+                            will_retry,
                         },
                     ),
                     &definition,
                 )?;
+
                 self.store.update_execution(&execution, version).await?;
 
-                let attempt_count = execution
-                    .task(lease.workflow_task_id)
-                    .map(|task| task.attempts().len() as u32)
-                    .unwrap_or(0);
-
-                if self.retry_policy.should_retry(attempt_count) {
+                if will_retry {
                     let delay = self.retry_policy.delay_for_attempt(attempt_count + 1);
                     miranda_scheduler::delay(delay).await;
 
