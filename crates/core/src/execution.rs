@@ -15,6 +15,13 @@ use crate::{
     workflow::{WorkflowDefinition, WorkflowTask},
 };
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NextAction {
+    RunTasks(Vec<WorkflowTaskId>),
+    Finished(ExecutionStatus),
+    Deadlocked,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Execution {
     id: ExecutionId,
@@ -329,7 +336,9 @@ impl Execution {
             EventPayload::TaskCompleted { workflow_task_id } => {
                 self.complete_task(*workflow_task_id)?;
             }
-            EventPayload::TaskFailed { workflow_task_id, .. } => {
+            EventPayload::TaskFailed {
+                workflow_task_id, ..
+            } => {
                 self.fail_task(*workflow_task_id)?;
             }
             EventPayload::TaskCancelled { workflow_task_id } => {
@@ -350,6 +359,25 @@ impl Execution {
         }
 
         Ok(event)
+    }
+
+    pub fn next_action(&self, definition: &WorkflowDefinition) -> NextAction {
+        if self.is_finished() {
+            return NextAction::Finished(self.status);
+        }
+
+        let ready = self.ready_tasks(definition);
+
+        if !ready.is_empty() {
+            return NextAction::RunTasks(ready);
+        }
+
+        // Ready is empty and execution isn't finished — either a task is
+        // still Running (caller hasn't applied its result yet, a normal
+        // in-flight state a caller shouldn't be polling next_action during)
+        // or nothing can ever become ready again. Either way, this is a
+        // stuck condition from next_action's point of view.
+        NextAction::Deadlocked
     }
 }
 
@@ -832,5 +860,40 @@ mod tests {
         let deserialized: Execution = serde_json::from_str(&json).unwrap();
 
         assert_eq!(execution, deserialized);
+    }
+
+    #[test]
+    fn next_action_returns_finished_when_execution_is_finished() {
+        let mut execution = Execution::new(WorkflowVersionId::new());
+        let definition = WorkflowDefinition::new(vec![]).unwrap();
+        execution.start().unwrap();
+        execution.terminate().unwrap();
+
+        assert_eq!(
+            execution.next_action(&definition),
+            NextAction::Finished(ExecutionStatus::Terminated)
+        );
+    }
+
+    #[test]
+    fn next_action_returns_run_tasks_when_tasks_are_ready() {
+        let (definition, task_id) = single_task_definition();
+        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+
+        assert_eq!(
+            execution.next_action(&definition),
+            NextAction::RunTasks(vec![task_id])
+        );
+    }
+
+    #[test]
+    fn next_action_returns_deadlocked_when_no_ready_tasks_and_not_finished() {
+        let (definition, task_id) = single_task_definition();
+        let mut execution =
+            Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+        execution.start().unwrap();
+        execution.start_task(task_id, &definition).unwrap();
+
+        assert_eq!(execution.next_action(&definition), NextAction::Deadlocked);
     }
 }
