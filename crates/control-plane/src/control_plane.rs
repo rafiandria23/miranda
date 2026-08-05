@@ -19,32 +19,36 @@ use std::{
 
 use crate::{
     ControlPlaneError,
+    dispatcher::DispatchStrategy,
     lease_manager::{DEFAULT_LEASE_TTL, LeaseManager, LeaseToken},
     queue::{QueueItem, TaskQueue},
     router::{DEFAULT_WORKER_STALENESS_THRESHOLD, Router, WorkerInfo},
 };
 
-pub struct ControlPlane<Q, R, S> {
+pub struct ControlPlane<Q, R, S, D> {
     queue: Q,
     router: R,
     store: S,
+    dispatch: D,
     leases: LeaseManager,
     retry_policy: RetryPolicy,
     lease_ttl: Duration,
     worker_staleness_threshold: Duration,
 }
 
-impl<Q, R, S> ControlPlane<Q, R, S>
+impl<Q, R, S, D> ControlPlane<Q, R, S, D>
 where
     Q: TaskQueue,
     R: Router,
     S: WorkflowStore,
+    D: DispatchStrategy,
 {
-    pub fn new(queue: Q, router: R, store: S) -> Self {
+    pub fn new(queue: Q, router: R, store: S, dispatch: D) -> Self {
         Self {
             queue,
             router,
             store,
+            dispatch,
             leases: LeaseManager::new(),
             retry_policy: RetryPolicy::default(),
             lease_ttl: DEFAULT_LEASE_TTL,
@@ -99,7 +103,7 @@ where
         &self,
         worker_id: WorkerId,
     ) -> Result<Option<TaskAssignment>, ControlPlaneError> {
-        let Some(item) = self.queue.dequeue().await? else {
+        let Some(item) = self.dispatch.next(worker_id).await? else {
             return Ok(None);
         };
 
@@ -298,11 +302,12 @@ mod tests {
     use miranda_engine::retry::Backoff;
     use miranda_storage::MemoryStore;
 
-    use crate::{queue::InMemoryTaskQueue, router::InMemoryRouter};
+    use crate::{dispatcher::Dispatcher, queue::InMemoryTaskQueue, router::InMemoryRouter};
 
     use super::*;
 
-    type TestControlPlane = ControlPlane<InMemoryTaskQueue, InMemoryRouter, MemoryStore>;
+    type TestControlPlane =
+        ControlPlane<InMemoryTaskQueue, InMemoryRouter, MemoryStore, Dispatcher<InMemoryTaskQueue>>;
 
     fn harness() -> (
         TestControlPlane,
@@ -313,8 +318,10 @@ mod tests {
         let queue = InMemoryTaskQueue::new();
         let router = InMemoryRouter::new();
         let store = MemoryStore::new();
+        let dispatch = Dispatcher::new(queue.clone());
 
-        let control_plane = ControlPlane::new(queue.clone(), router.clone(), store.clone());
+        let control_plane =
+            ControlPlane::new(queue.clone(), router.clone(), store.clone(), dispatch);
 
         (control_plane, queue, router, store)
     }
@@ -330,11 +337,14 @@ mod tests {
         let queue = InMemoryTaskQueue::new();
         let router = InMemoryRouter::new();
         let store = MemoryStore::new();
+        let dispatch = Dispatcher::new(queue.clone());
 
         let control_plane =
-            ControlPlane::new(queue.clone(), router.clone(), store.clone()).with_retry_policy(
-                RetryPolicy::new(max_attempts, Backoff::Fixed(Duration::ZERO)),
-            );
+            ControlPlane::new(queue.clone(), router.clone(), store.clone(), dispatch)
+                .with_retry_policy(RetryPolicy::new(
+                    max_attempts,
+                    Backoff::Fixed(Duration::ZERO),
+                ));
 
         (control_plane, queue, router, store)
     }
@@ -742,9 +752,10 @@ mod tests {
         let queue = InMemoryTaskQueue::new();
         let router = InMemoryRouter::new();
         let store = MemoryStore::new();
+        let dispatch = Dispatcher::new(queue.clone());
 
-        let control_plane =
-            ControlPlane::new(queue, router, store).with_lease_ttl(Duration::from_secs(5));
+        let control_plane = ControlPlane::new(queue, router, store, dispatch)
+            .with_lease_ttl(Duration::from_secs(5));
 
         assert_eq!(control_plane.lease_ttl, Duration::from_secs(5));
     }
@@ -754,8 +765,9 @@ mod tests {
         let queue = InMemoryTaskQueue::new();
         let router = InMemoryRouter::new();
         let store = MemoryStore::new();
+        let dispatch = Dispatcher::new(queue.clone());
 
-        let control_plane = ControlPlane::new(queue, router, store)
+        let control_plane = ControlPlane::new(queue, router, store, dispatch)
             .with_worker_staleness_threshold(Duration::from_secs(5));
 
         assert_eq!(
@@ -777,8 +789,14 @@ mod tests {
     async fn reap_expired_leases_fails_and_requeues_abandoned_running_tasks() {
         let queue = InMemoryTaskQueue::new();
         let store = MemoryStore::new();
-        let control_plane = ControlPlane::new(queue.clone(), InMemoryRouter::new(), store.clone())
-            .with_lease_ttl(Duration::ZERO);
+        let dispatch = Dispatcher::new(queue.clone());
+        let control_plane = ControlPlane::new(
+            queue.clone(),
+            InMemoryRouter::new(),
+            store.clone(),
+            dispatch,
+        )
+        .with_lease_ttl(Duration::ZERO);
 
         let (definition, task_id) = single_task_definition();
         let workflow_version_id = WorkflowVersionId::new();
@@ -824,8 +842,9 @@ mod tests {
         let queue = InMemoryTaskQueue::new();
         let router = InMemoryRouter::new();
         let store = MemoryStore::new();
+        let dispatch = Dispatcher::new(queue.clone());
 
-        let control_plane = ControlPlane::new(queue, router.clone(), store)
+        let control_plane = ControlPlane::new(queue, router.clone(), store, dispatch)
             .with_worker_staleness_threshold(Duration::ZERO);
         let worker_id = WorkerId::new();
 
