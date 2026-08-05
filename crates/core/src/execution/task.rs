@@ -152,8 +152,9 @@ impl Task {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::execution::status::AttemptStatus;
+
+    use super::*;
 
     #[test]
     fn new_starts_pending_with_no_attempts() {

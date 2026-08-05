@@ -383,8 +383,9 @@ impl Execution {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::id::WorkflowTaskId;
+
+    use super::*;
 
     fn single_task_definition() -> (WorkflowDefinition, WorkflowTaskId) {
         let task_id = WorkflowTaskId::new();

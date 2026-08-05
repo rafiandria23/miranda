@@ -63,8 +63,9 @@ impl WorkflowVersion {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use crate::{id::WorkflowTaskId, workflow::WorkflowTask};
+
+    use super::*;
 
     fn single_task_definition() -> WorkflowDefinition {
         let task =
