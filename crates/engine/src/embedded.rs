@@ -10,7 +10,7 @@ use tracing::{error, info, instrument};
 use crate::{
     EngineError,
     retry::RetryPolicy,
-    task_runner::{TaskDispatcher, TaskOutcome},
+    task_runner::{TaskDispatcher, TaskOutcome, TaskOutcomeResult},
 };
 
 pub struct EmbeddedEngine<E, S> {
@@ -70,16 +70,23 @@ where
 
                 NextAction::RunTasks(ready) => {
                     for workflow_task_id in ready {
-                        let result = dispatcher
-                            .dispatch(&mut execution, definition, workflow_task_id)
-                            .await?;
+                        loop {
+                            let result = dispatcher
+                                .dispatch(&mut execution, definition, workflow_task_id)
+                                .await?;
 
-                        outcome
-                            .apply(&mut execution, definition, workflow_task_id, result)
-                            .await?;
+                            let outcome_result = outcome
+                                .apply(&mut execution, definition, workflow_task_id, result)
+                                .await?;
 
-                        self.store.update_execution(&execution, version).await?;
-                        version += 1;
+                            self.store.update_execution(&execution, version).await?;
+                            version += 1;
+
+                            match outcome_result {
+                                TaskOutcomeResult::Completed => break,
+                                TaskOutcomeResult::Retried => continue,
+                            }
+                        }
                     }
                 }
             }

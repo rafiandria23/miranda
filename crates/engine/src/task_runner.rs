@@ -1,6 +1,7 @@
 use miranda_core::{
+    error::ExecutionError,
     event::{Event, EventPayload},
-    execution::Execution,
+    execution::{Execution, TaskStatus},
     id::WorkflowTaskId,
     workflow::WorkflowDefinition,
 };
@@ -31,15 +32,22 @@ where
         definition: &WorkflowDefinition,
         workflow_task_id: WorkflowTaskId,
     ) -> Result<Result<(), WorkerError>, EngineError> {
+        let status = execution
+            .task(workflow_task_id)
+            .ok_or(ExecutionError::UnknownTask(workflow_task_id))?
+            .status();
+
+        let payload = match status {
+            TaskStatus::Pending => EventPayload::TaskStarted { workflow_task_id },
+
+            TaskStatus::Failed => EventPayload::TaskRetried { workflow_task_id },
+
+            _other => return Err(ExecutionError::TaskNotReady(workflow_task_id).into()),
+        };
+
         debug!(task_id = %workflow_task_id, "starting task");
 
-        execution.apply(
-            Event::new(
-                execution.id(),
-                EventPayload::TaskStarted { workflow_task_id },
-            ),
-            definition,
-        )?;
+        execution.apply(Event::new(execution.id(), payload), definition)?;
 
         let workflow_task = definition
             .task(workflow_task_id)
@@ -121,14 +129,6 @@ impl<'a> TaskOutcome<'a> {
                         "retrying task"
                     );
                     delay(delay_duration).await;
-
-                    execution.apply(
-                        Event::new(
-                            execution.id(),
-                            EventPayload::TaskRetried { workflow_task_id },
-                        ),
-                        definition,
-                    )?;
 
                     Ok(TaskOutcomeResult::Retried)
                 } else {
