@@ -648,11 +648,57 @@ mod tests {
             .unwrap();
 
         let (stored, _version) = store.get_execution(execution_id).await.unwrap();
-        assert_eq!(stored.task(task_id).unwrap().status(), TaskStatus::Running);
+        assert_eq!(stored.task(task_id).unwrap().status(), TaskStatus::Failed);
         assert_eq!(stored.status(), ExecutionStatus::Running);
 
         let requeued = queue.dequeue().await.unwrap();
         assert!(requeued.is_some(), "task should be requeued for retry");
+    }
+
+    #[tokio::test]
+    async fn retried_task_can_be_polled_and_completed_again() {
+        let (control_plane, _queue, _router, store) = fast_retry_control_plane(3);
+        let (definition, task_id) = single_task_definition();
+        let workflow_version_id = WorkflowVersionId::new();
+        let execution = Execution::from_definition(workflow_version_id, &definition).unwrap();
+        let execution_id = execution.id();
+        let worker_id = WorkerId::new();
+
+        save_definition(&store, workflow_version_id, &definition).await;
+        control_plane
+            .submit_execution(execution, definition)
+            .await
+            .unwrap();
+
+        let first_assignment = control_plane.poll_task(worker_id).await.unwrap().unwrap();
+
+        control_plane
+            .report_result(
+                worker_id,
+                first_assignment.lease_token,
+                Err(miranda_worker::WorkerError::ExecutionFailed {
+                    message: "boom".to_string(),
+                }),
+            )
+            .await
+            .unwrap();
+
+        let second_assignment = control_plane
+            .poll_task(worker_id)
+            .await
+            .unwrap()
+            .expect("retried task should be pollable again");
+
+        let (stored, _version) = store.get_execution(execution_id).await.unwrap();
+        assert_eq!(stored.task(task_id).unwrap().status(), TaskStatus::Running);
+
+        control_plane
+            .report_result(worker_id, second_assignment.lease_token, Ok(()))
+            .await
+            .unwrap();
+
+        let (stored, _version) = store.get_execution(execution_id).await.unwrap();
+        assert_eq!(stored.task(task_id).unwrap().status(), TaskStatus::Completed);
     }
 
     #[tokio::test]
