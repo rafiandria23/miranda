@@ -1,39 +1,51 @@
 use miranda_core::id::WorkerId;
-use std::{collections::HashSet, sync::Arc, time::Duration};
-use tokio::sync::{Notify, RwLock, mpsc};
-use tracing::{debug, info, warn};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Arc,
+    time::Duration,
+};
+use tokio::{
+    sync::{RwLock, mpsc},
+    task::{JoinHandle, JoinSet},
+};
+use tokio_util::sync::CancellationToken;
+use tracing::{debug, error, info, warn};
 
-use crate::{ControlPlaneClient, HeartbeatRunner, TaskExecutor, WorkerError};
+use crate::{
+    assignment::{ControlPlaneClient, TaskAssignment},
+    error::WorkerError,
+    executor::TaskExecutor,
+    heartbeat::{
+        DEFAULT_HEARTBEAT_INTERVAL, DEFAULT_MAX_CONSECUTIVE_HEARTBEAT_FAILURES, HeartbeatRunner,
+    },
+};
 
 pub struct WorkerConfig {
     pub heartbeat_interval: Duration,
+    pub max_consecutive_heartbeat_failures: u32,
     pub poll_interval: Duration,
-    pub graceful_shutdown_timeout: Duration,
+    pub drain_timeout: Duration,
 }
 
 impl Default for WorkerConfig {
     fn default() -> Self {
         Self {
-            heartbeat_interval: Duration::from_secs(30),
+            heartbeat_interval: DEFAULT_HEARTBEAT_INTERVAL,
+            max_consecutive_heartbeat_failures: DEFAULT_MAX_CONSECUTIVE_HEARTBEAT_FAILURES,
             poll_interval: Duration::from_secs(6),
-            graceful_shutdown_timeout: Duration::from_secs(60),
+            drain_timeout: Duration::from_secs(60),
         }
     }
 }
 
 pub struct WorkerHandle {
-    shutdown_tx: mpsc::Sender<()>,
-    heartbeat_shutdown: Arc<Notify>,
-
-    // Store the join handle so we can await completion
-    task_handle: tokio::task::JoinHandle<Result<(), WorkerError>>,
+    shutdown: CancellationToken,
+    task_handle: JoinHandle<Result<(), WorkerError>>,
 }
 
 impl WorkerHandle {
     pub async fn shutdown(self) -> Result<(), WorkerError> {
-        let _ = self.shutdown_tx.send(()).await;
-
-        self.heartbeat_shutdown.notify_waiters();
+        self.shutdown.cancel();
 
         match self.task_handle.await {
             Ok(result) => result,
@@ -81,113 +93,208 @@ where
     }
 
     pub fn run(self) -> WorkerHandle {
-        let (shutdown_tx, mut shutdown_rx) = mpsc::channel::<()>(1);
-        let heartbeat_shutdown = Arc::new(Notify::new());
+        let shutdown = CancellationToken::new();
+        let shutdown_for_task = shutdown.clone();
 
         let worker_id = self.id;
-        let capabilities = self.capabilities.clone();
-        let control_plane = self.control_plane.clone();
-        let executor = self.executor.clone();
+        let capabilities = self.capabilities;
+        let control_plane = self.control_plane;
+        let executor = self.executor;
         let config = self.config;
 
         let task_handle = tokio::spawn(async move {
-            // 1. Register with control plane
             info!(worker_id = %worker_id, "registering with control plane");
-
             control_plane.register(worker_id, &capabilities).await?;
 
-            // 2. Spawn heartbeat task
-            let active_leases: Arc<RwLock<Vec<String>>> = Arc::new(RwLock::new(Vec::new()));
+            let (active_tx, mut active_rx) = mpsc::channel::<()>(1);
+
+            let active_leases: Arc<RwLock<HashMap<String, ()>>> =
+                Arc::new(RwLock::new(HashMap::new()));
             let active_leases_for_heartbeat = active_leases.clone();
 
-            let heartbeat_runner =
-                HeartbeatRunner::new(worker_id, config.heartbeat_interval, control_plane.clone());
-            let heartbeat_handle = heartbeat_runner.shutdown_handle();
+            let heartbeat_runner = HeartbeatRunner::new(worker_id, control_plane.clone())
+                .with_interval(config.heartbeat_interval)
+                .with_max_consecutive_failures(config.max_consecutive_heartbeat_failures);
+            let heartbeat_shutdown_handle = heartbeat_runner.shutdown_handle();
 
-            tokio::spawn(async move {
-                heartbeat_runner
-                    .run(move || {
-                        let leases = active_leases_for_heartbeat.blocking_read().clone();
+            let heartbeat_handle = tokio::spawn(async move {
+                tokio::select! {
+                    biased;
 
-                        leases
-                    })
-                    .await;
+                    _ = active_rx.recv() => {
+                        info!(worker_id = %worker_id, "no active tasks remain, heartbeat stopping");
+                    }
+
+                    _ = heartbeat_runner.run(move || {
+                        let leases = active_leases_for_heartbeat.clone();
+
+                        async move {
+                            leases.read().await.keys().cloned().collect()
+                        }
+                    }) => {}
+                }
             });
 
-            // 3. Poll loop
-            let mut shutdown_requested = false;
+            let (assignment_tx, mut assignment_rx) = mpsc::channel::<TaskAssignment>(32);
+            let poll_shutdown = shutdown_for_task.clone();
+            let poll_control_plane = control_plane.clone();
+            let poll_capabilities = capabilities.clone();
+            let poll_interval = config.poll_interval;
+
+            let poll_handle = tokio::spawn(async move {
+                run_poll_loop(
+                    worker_id,
+                    poll_capabilities,
+                    poll_control_plane,
+                    poll_interval,
+                    poll_shutdown,
+                    assignment_tx,
+                )
+                .await;
+            });
+
+            let mut in_flight: JoinSet<()> = JoinSet::new();
+
+            macro_rules! spawn_assignment {
+                ($assignment:expr) => {{
+                    let executor = executor.clone();
+                    let control_plane = control_plane.clone();
+                    let canary = active_tx.clone();
+                    let leases = active_leases.clone();
+                    let assignment = $assignment;
+
+                    in_flight.spawn(async move {
+                        let _canary = canary; // held for task's lifetime
+
+                        execute_and_report(worker_id, executor, control_plane, leases, assignment)
+                            .await;
+                    });
+                }};
+            }
 
             loop {
                 tokio::select! {
-                    _ = tokio::time::sleep(config.poll_interval) => {
-                        if shutdown_requested {
-                            // Graceful shutdown: stop polling, finish active tasks
+                    biased;
 
-                            let leases = active_leases.read().await;
+                    Some(assignment) = assignment_rx.recv() => {
+                        spawn_assignment!(assignment);
+                    }
 
-                            if leases.is_empty() {
-                                info!(worker_id = %worker_id, "all tasks complete, shutting down");
-
-                                break;
-                            }
-
-                            debug!(worker_id = %worker_id, active_tasks = leases.len(), "waiting for tasks to complete");
-
-                            continue;
-                        }
-
-                        match control_plane.poll_task(worker_id, &capabilities).await {
-                            Ok(Some(assignment)) => {
-                                debug!(worker_id = %worker_id, task_type = assignment.task.task_type(), "task received");
-
-                                let lease_token = assignment.lease_token.clone();
-
-                                active_leases.write().await.push(lease_token.clone());
-
-                                let result = executor.execute(&assignment.task).await;
-
-                                active_leases.write().await.retain(|t| t != &lease_token);
-
-                                if let Err(e) = control_plane.report_result(worker_id, lease_token, result).await {
-                                    warn!(worker_id = %worker_id, error = %e, "failed to report result");
-                                }
-                            }
-
-                            Ok(None) => {
-                                debug!(worker_id = %worker_id, "no tasks available");
-                            }
-
-                            Err(e) => {
-                                warn!(worker_id = %worker_id, error = %e, "poll failed");
-                            }
+                    Some(result) = in_flight.join_next(), if !in_flight.is_empty() => {
+                        if let Err(join_error) = result {
+                            error!(worker_id = %worker_id, error = %join_error, "task panicked");
                         }
                     }
 
-                    _ = shutdown_rx.recv() => {
-                        if !shutdown_requested {
-                            info!(worker_id = %worker_id, "shutdown requested, finishing active tasks");
+                    _ = shutdown_for_task.cancelled() => {
+                        info!(worker_id = %worker_id, "shutdown signaled, draining active tasks");
 
-                            shutdown_requested = true;
-                        }
+                        break;
                     }
                 }
             }
 
-            // 4. Shutdown heartbeat
-            heartbeat_handle.notify_waiters();
+            while let Ok(assignment) = assignment_rx.try_recv() {
+                spawn_assignment!(assignment);
+            }
 
-            // 5. Deregister
+            drop(active_tx);
+
+            let drain_result = tokio::time::timeout(config.drain_timeout, async {
+                while let Some(result) = in_flight.join_next().await {
+                    if let Err(join_error) = result {
+                        error!(worker_id = %worker_id, error = %join_error, "task panicked during drain");
+                    }
+                }
+            }).await;
+
+            if drain_result.is_err() {
+                warn!(
+                    worker_id = %worker_id,
+                    remaining = in_flight.len(),
+                    "drain timeout exceeded, aborting remaining tasks"
+                );
+
+                in_flight.abort_all();
+
+                while in_flight.join_next().await.is_some() {}
+            }
+
+            poll_handle.abort(); // safety net; run_poll_loop should already have returned
+
+            heartbeat_shutdown_handle.notify_waiters();
+
+            if let Err(e) = heartbeat_handle.await {
+                warn!(worker_id = %worker_id, error = %e, "heartbeat task did not shut down cleanly");
+            }
+
             info!(worker_id = %worker_id, "deregistering from control plane");
-
             control_plane.deregister(worker_id).await?;
 
             Ok(())
         });
 
         WorkerHandle {
-            shutdown_tx,
-            heartbeat_shutdown,
+            shutdown,
             task_handle,
         }
+    }
+}
+
+async fn run_poll_loop<C: ControlPlaneClient>(
+    worker_id: WorkerId,
+    capabilities: HashSet<String>,
+    control_plane: Arc<C>,
+    poll_interval: Duration,
+    shutdown: CancellationToken,
+    assignment_tx: mpsc::Sender<TaskAssignment>,
+) {
+    loop {
+        tokio::select! {
+            biased;
+
+            _ = shutdown.cancelled() => {
+                debug!(worker_id = %worker_id, "poll loop stopping");
+
+                return;
+            }
+
+            _ = tokio::time::sleep(poll_interval) => {
+                match control_plane.poll_task(worker_id, &capabilities).await {
+                    Ok(Some(assignment)) => {
+                        if assignment_tx.send(assignment).await.is_err() {
+                            return;
+                        }
+                    }
+
+                    Ok(None) => debug!(worker_id = %worker_id, "no tasks available"),
+
+                    Err(e) => warn!(worker_id = %worker_id, error = %e, "poll failed"),
+                }
+            }
+        }
+    }
+}
+
+async fn execute_and_report<C: ControlPlaneClient, E: TaskExecutor>(
+    worker_id: WorkerId,
+    executor: Arc<E>,
+    control_plane: Arc<C>,
+    active_leases: Arc<RwLock<HashMap<String, ()>>>,
+    assignment: TaskAssignment,
+) {
+    let lease_token = assignment.lease_token.clone();
+
+    active_leases.write().await.insert(lease_token.clone(), ());
+
+    let result = executor.execute(&assignment.task).await;
+
+    active_leases.write().await.remove(&lease_token);
+
+    if let Err(e) = control_plane
+        .report_result(worker_id, lease_token, result)
+        .await
+    {
+        warn!(worker_id = %worker_id, error = %e, "failed to report result");
     }
 }

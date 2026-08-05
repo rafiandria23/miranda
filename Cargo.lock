@@ -937,6 +937,7 @@ dependencies = [
  "miranda-core",
  "thiserror",
  "tokio",
+ "tokio-util",
  "tracing",
 ]
 

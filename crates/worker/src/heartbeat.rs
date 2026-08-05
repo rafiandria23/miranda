@@ -1,13 +1,17 @@
 use miranda_core::id::WorkerId;
-use std::{sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc, time::Duration};
 use tokio::sync::Notify;
 use tracing::{debug, error, info, warn};
 
 use crate::ControlPlaneClient;
 
+pub const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
+pub const DEFAULT_MAX_CONSECUTIVE_HEARTBEAT_FAILURES: u32 = 3;
+
 pub struct HeartbeatRunner<C> {
     worker_id: WorkerId,
     interval: Duration,
+    max_consecutive_failures: u32,
     client: Arc<C>,
     shutdown: Arc<Notify>,
 }
@@ -16,31 +20,42 @@ impl<C> HeartbeatRunner<C>
 where
     C: ControlPlaneClient,
 {
-    pub fn new(worker_id: WorkerId, interval: Duration, client: Arc<C>) -> Self {
+    pub fn new(worker_id: WorkerId, client: Arc<C>) -> Self {
         Self {
             worker_id,
-            interval,
+            interval: DEFAULT_HEARTBEAT_INTERVAL,
+            max_consecutive_failures: DEFAULT_MAX_CONSECUTIVE_HEARTBEAT_FAILURES,
             client,
             shutdown: Arc::new(Notify::new()),
         }
+    }
+
+    pub fn with_interval(mut self, interval: Duration) -> Self {
+        self.interval = interval;
+        self
+    }
+
+    pub fn with_max_consecutive_failures(mut self, max_consecutive_failures: u32) -> Self {
+        self.max_consecutive_failures = max_consecutive_failures;
+        self
     }
 
     pub fn shutdown_handle(&self) -> Arc<Notify> {
         self.shutdown.clone()
     }
 
-    pub async fn run<F>(&self, get_active_leases: F)
+    pub async fn run<F, Fut>(&self, get_active_leases: F)
     where
-        F: Fn() -> Vec<String> + Send + Sync + 'static,
+        F: Fn() -> Fut + Send + Sync + 'static,
+        Fut: Future<Output = Vec<String>> + Send,
     {
         let mut interval_timer = tokio::time::interval(self.interval);
         let mut consecutive_failures = 0u32;
-        const MAX_FAILURES: u32 = 3;
 
         loop {
             tokio::select! {
                 _ = interval_timer.tick() => {
-                    let leases = get_active_leases();
+                    let leases = get_active_leases().await;
 
                     debug!(worker_id = %self.worker_id, lease_count = leases.len(), "sending heartbeat");
 
@@ -52,6 +67,7 @@ where
 
                             consecutive_failures = 0;
                         }
+
                         Err(e) => {
                             consecutive_failures += 1;
 
@@ -62,10 +78,10 @@ where
                                 "heartbeat failed"
                             );
 
-                            if consecutive_failures >= MAX_FAILURES {
+                            if consecutive_failures >= self.max_consecutive_failures {
                                 error!(
                                     worker_id = %self.worker_id,
-                                    max_failures = MAX_FAILURES,
+                                    max_failures = self.max_consecutive_failures,
                                     "heartbeat max failures reached, shutting down"
                                 );
 

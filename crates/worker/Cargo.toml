@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 miranda-core = { path = "../core" }
-
 thiserror = { workspace = true }
 tokio = { workspace = true }
+tokio-util = { workspace = true }
 tracing = { workspace = true }
