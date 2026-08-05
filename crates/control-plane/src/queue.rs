@@ -56,8 +56,9 @@ impl TaskQueue for InMemoryTaskQueue {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use miranda_core::workflow::WorkflowTask;
+
+    use super::*;
 
     fn queue_item() -> QueueItem {
         let workflow_task_id = WorkflowTaskId::new();

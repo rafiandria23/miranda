@@ -211,6 +211,32 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn touch_updates_last_heartbeat_and_prevents_reaping() {
+        let router = InMemoryRouter::new();
+        let worker = WorkerInfo {
+            id: WorkerId::new(),
+            capabilities: ["default"].iter().map(|c| c.to_string()).collect(),
+            last_heartbeat: Instant::now() - Duration::from_secs(60),
+        };
+        let worker_id = worker.id;
+
+        router.register(worker).await.unwrap();
+        router.touch(worker_id).await.unwrap();
+
+        let reaped = router.reap_stale(Duration::from_secs(30)).await;
+
+        assert!(reaped.is_empty());
+        assert_eq!(router.select_worker("default").await, Some(worker_id));
+    }
+
+    #[tokio::test]
+    async fn touch_unknown_worker_is_a_no_op() {
+        let router = InMemoryRouter::new();
+
+        assert!(router.touch(WorkerId::new()).await.is_ok());
+    }
+
+    #[tokio::test]
     async fn select_worker_picks_a_worker_when_multiple_qualify() {
         let router = InMemoryRouter::new();
         let worker_a = worker_with_capabilities(&["default"]);

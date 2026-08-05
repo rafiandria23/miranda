@@ -294,12 +294,13 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use miranda_core::{execution::ExecutionStatus, id::WorkflowVersionId, workflow::WorkflowTask};
     use miranda_engine::retry::Backoff;
     use miranda_storage::MemoryStore;
 
     use crate::{queue::InMemoryTaskQueue, router::InMemoryRouter};
+
+    use super::*;
 
     type TestControlPlane = ControlPlane<InMemoryTaskQueue, InMemoryRouter, MemoryStore>;
 
