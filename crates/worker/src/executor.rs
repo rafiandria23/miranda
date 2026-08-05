@@ -1,3 +1,7 @@
+pub mod in_process;
+
+pub use in_process::InProcessExecutor;
+
 use miranda_core::workflow::WorkflowTask;
 use std::future::Future;
 
