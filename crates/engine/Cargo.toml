@@ -7,7 +7,6 @@ edition = "2024"
 miranda-core = { path = "../core" }
 miranda-storage = { path = "../storage" }
 miranda-worker = { path = "../worker" }
-
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

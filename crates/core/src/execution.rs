@@ -272,7 +272,6 @@ impl Execution {
         Ok(task)
     }
 
-    // Returns `true` if the execution has reached a terminal status.
     pub fn is_finished(&self) -> bool {
         matches!(
             self.status,
@@ -283,8 +282,6 @@ impl Execution {
         )
     }
 
-    // Marks any tasks left in `Running` state as `Failed` so they can be
-    // retried after worker node failover or orchestrator crash recovery.
     pub fn recover_abandoned_tasks(
         &mut self,
         definition: &WorkflowDefinition,
@@ -372,11 +369,14 @@ impl Execution {
             return NextAction::RunTasks(ready);
         }
 
-        // Ready is empty and execution isn't finished — either a task is
-        // still Running (caller hasn't applied its result yet, a normal
-        // in-flight state a caller shouldn't be polling next_action during)
-        // or nothing can ever become ready again. Either way, this is a
-        // stuck condition from next_action's point of view.
+        if self
+            .tasks
+            .iter()
+            .all(|t| t.status() == TaskStatus::Completed)
+        {
+            return NextAction::Finished(self.status);
+        }
+
         NextAction::Deadlocked
     }
 }
@@ -896,5 +896,20 @@ mod tests {
         execution.start_task(task_id, &definition).unwrap();
 
         assert_eq!(execution.next_action(&definition), NextAction::Deadlocked);
+    }
+
+    #[test]
+    fn next_action_returns_finished_when_all_tasks_completed_but_execution_not_yet_completed() {
+        let (definition, task_id) = single_task_definition();
+        let mut execution =
+            Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+        execution.start().unwrap();
+        execution.start_task(task_id, &definition).unwrap();
+        execution.complete_task(task_id).unwrap();
+
+        assert_eq!(
+            execution.next_action(&definition),
+            NextAction::Finished(ExecutionStatus::Running)
+        );
     }
 }
