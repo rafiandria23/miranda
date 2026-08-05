@@ -209,10 +209,7 @@ mod tests {
             let policy = RetryPolicy::default();
 
             assert_eq!(policy.max_attempts, 3);
-            assert_eq!(
-                policy.backoff,
-                Backoff::Fixed(Duration::from_millis(120))
-            );
+            assert_eq!(policy.backoff, Backoff::Fixed(Duration::from_millis(120)));
         }
     }
 }
