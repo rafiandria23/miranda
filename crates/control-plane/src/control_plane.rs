@@ -10,7 +10,7 @@ use miranda_engine::{
     task_runner::{TaskOutcome, TaskOutcomeResult},
 };
 use miranda_storage::WorkflowStore;
-use miranda_worker::dispatcher::TaskAssignment;
+use miranda_worker::assignment::TaskAssignment;
 use std::{
     collections::HashMap,
     sync::Arc,
