@@ -1,0 +1,31 @@
+{
+  "db_name": "MySQL",
+  "query": "\n            SELECT definition FROM workflow_versions\n            WHERE id = ?\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "definition",
+        "type_info": {
+          "type": "Json",
+          "flags": "NOT_NULL | BLOB | BINARY | NO_DEFAULT_VALUE",
+          "collation": 63,
+          "max_size": 4294967295
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.workflow_versions",
+            "name": "definition"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "6895406d4e4bae959559a372a28ee8f082ef94dadfb8607828986cb213496f31"
+}

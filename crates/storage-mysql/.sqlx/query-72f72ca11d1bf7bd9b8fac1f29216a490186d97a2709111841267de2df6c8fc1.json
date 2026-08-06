@@ -1,0 +1,31 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT state FROM workflow_executions WHERE status IN (?, ?)",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": {
+          "type": "Json",
+          "flags": "NOT_NULL | BLOB | BINARY | NO_DEFAULT_VALUE",
+          "collation": 63,
+          "max_size": 4294967295
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.workflow_executions",
+            "name": "state"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "72f72ca11d1bf7bd9b8fac1f29216a490186d97a2709111841267de2df6c8fc1"
+}

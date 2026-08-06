@@ -1,0 +1,31 @@
+{
+  "db_name": "MySQL",
+  "query": "\n            SELECT id FROM workflow_versions\n            WHERE workflow_id = ?\n            ORDER BY version ASC\n            ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | PRIMARY_KEY | NO_DEFAULT_VALUE",
+          "collation": 255,
+          "max_size": 144
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.workflow_versions",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "283a5bb4311cde0e5cd434edd198030c0c386913a95cbebcec94c560d6b45a72"
+}

@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT state, version FROM workflow_executions WHERE id = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "state",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workflow_executions",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "name": "version",
+        "ordinal": 1,
+        "type_info": "Integer",
+        "origin": {
+          "Table": {
+            "table": "workflow_executions",
+            "name": "version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "c2c43f646f06d11a109e94fe80b745cd58c64cdd4a7d1bc30c702390dba2c23b"
+}

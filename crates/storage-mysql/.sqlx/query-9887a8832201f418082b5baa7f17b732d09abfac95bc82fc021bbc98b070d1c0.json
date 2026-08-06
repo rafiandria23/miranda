@@ -1,0 +1,31 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT version FROM workflow_executions WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "version",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL",
+          "collation": 63,
+          "max_size": 20
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.workflow_executions",
+            "name": "version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9887a8832201f418082b5baa7f17b732d09abfac95bc82fc021bbc98b070d1c0"
+}

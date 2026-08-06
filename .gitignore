@@ -22,6 +22,11 @@
 # SQLx offline query metadata (optional — commit for CI, ignore for local dev)
 # .sqlx/
 
+# SQLite databases
+*.sqlite
+*.sqlite3
+*.db
+
 # Test artifacts
 *.profraw
 *.profdata

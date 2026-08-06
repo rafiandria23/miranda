@@ -19,8 +19,8 @@ pub enum StorageError {
         actual: u64,
     },
 
-    #[error("database error: {0}")]
-    Database(String),
+    #[error("backend error: {0}")]
+    Backend(String),
 
     #[error("serialization error: {0}")]
     Serialization(String),

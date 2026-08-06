@@ -1,0 +1,48 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT state, version FROM workflow_executions WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "state",
+        "type_info": {
+          "type": "Json",
+          "flags": "NOT_NULL | BLOB | BINARY | NO_DEFAULT_VALUE",
+          "collation": 63,
+          "max_size": 4294967295
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.workflow_executions",
+            "name": "state"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "version",
+        "type_info": {
+          "type": "LongLong",
+          "flags": "NOT_NULL",
+          "collation": 63,
+          "max_size": 20
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.workflow_executions",
+            "name": "version"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "0e99ae67434db2e41fcb3bfe78d9528f9585d90d58488ad4dae06a76c2e48bd5"
+}

@@ -7,6 +7,9 @@ members = [
   "crates/engine",
   "crates/server",
   "crates/storage",
+  "crates/storage-mysql",
+  "crates/storage-postgres",
+  "crates/storage-sqlite",
   "crates/worker",
 ]
 
@@ -15,8 +18,17 @@ async-trait = { version = "0.1.91" }
 futures-util = { version = "0.3.33" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151" }
+sqlx = { version = "0.9.0", features = [
+  "runtime-tokio",
+  "tls-rustls",
+  "uuid",
+  "json",
+  "macros",
+  "migrate",
+] }
 thiserror = { version = "2.0.19" }
 tokio = { version = "1.53.1", features = ["full"] }
 tokio-util = { version = "0.7.19" }
 tracing = { version = "0.1.44" }
+url = { version = "2.5.8" }
 uuid = { version = "1.24.0", features = ["serde", "v4", "v7"] }
