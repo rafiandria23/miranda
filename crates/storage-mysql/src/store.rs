@@ -78,6 +78,7 @@ impl WorkflowStore for MySqlStore {
     async fn save_definition(
         &self,
         workflow_id: WorkflowId,
+        name: &str,
         version_id: WorkflowVersionId,
         version: u64,
         definition: &WorkflowDefinition,
@@ -101,7 +102,7 @@ impl WorkflowStore for MySqlStore {
             VALUES (?, ?)
             "#,
             workflow_id_str,
-            workflow_id_str,
+            name,
         )
         .execute(&mut *tx)
         .await

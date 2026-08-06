@@ -368,6 +368,7 @@ mod tests {
         store
             .save_definition(
                 miranda_core::id::WorkflowId::new(),
+                "test_workflow",
                 workflow_version_id,
                 1,
                 definition,
@@ -698,7 +699,10 @@ mod tests {
             .unwrap();
 
         let (stored, _version) = store.get_execution(execution_id).await.unwrap();
-        assert_eq!(stored.task(task_id).unwrap().status(), TaskStatus::Completed);
+        assert_eq!(
+            stored.task(task_id).unwrap().status(),
+            TaskStatus::Completed
+        );
     }
 
     #[tokio::test]

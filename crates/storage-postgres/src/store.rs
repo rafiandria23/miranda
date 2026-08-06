@@ -77,6 +77,7 @@ impl WorkflowStore for PostgresStore {
     async fn save_definition(
         &self,
         workflow_id: WorkflowId,
+        name: &str,
         version_id: WorkflowVersionId,
         version: u64,
         definition: &WorkflowDefinition,
@@ -97,7 +98,7 @@ impl WorkflowStore for PostgresStore {
             ON CONFLICT (id) DO NOTHING
             "#,
             workflow_id.as_uuid(),
-            workflow_id.to_string(),
+            name,
         )
         .execute(&mut *tx)
         .await

@@ -36,6 +36,7 @@ impl WorkflowStore for SqliteStore {
     async fn save_definition(
         &self,
         workflow_id: WorkflowId,
+        name: &str,
         version_id: WorkflowVersionId,
         version: u64,
         definition: &WorkflowDefinition,
@@ -59,7 +60,7 @@ impl WorkflowStore for SqliteStore {
             VALUES (?1, ?2)
             "#,
             workflow_id_str,
-            workflow_id_str,
+            name,
         )
         .execute(&mut *tx)
         .await

@@ -11,6 +11,7 @@ pub trait WorkflowStore: Send + Sync {
     fn save_definition(
         &self,
         workflow_id: WorkflowId,
+        name: &str,
         version_id: WorkflowVersionId,
         version: u64,
         definition: &WorkflowDefinition,

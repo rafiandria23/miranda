@@ -24,10 +24,13 @@ impl WorkflowStore for MemoryStore {
     async fn save_definition(
         &self,
         workflow_id: WorkflowId,
+        name: &str,
         version_id: WorkflowVersionId,
         version: u64,
         definition: &WorkflowDefinition,
     ) -> Result<(), StorageError> {
+        let _ = name;
+
         let mut definitions = self.definitions.write().await;
 
         definitions.insert(version_id, (workflow_id, version, definition.clone()));
