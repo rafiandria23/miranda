@@ -1,6 +1,6 @@
-mod dto;
-mod error;
-mod lower;
+pub mod dto;
+pub mod error;
+pub mod lower;
 
 pub use dto::WorkflowSpec;
 pub use error::SpecError;

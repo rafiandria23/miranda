@@ -7,7 +7,9 @@ pub mod worker;
 
 pub use assignment::{ControlPlaneClient, TaskAssignment};
 pub use error::WorkerError;
-pub use executor::{InProcessExecutor, TaskExecutor};
+pub use executor::{
+    DispatchExecutor, InProcessExecutor, NoopExecutor, ShellExecutor, TaskExecutor, WaitExecutor,
+};
 pub use heartbeat::{
     DEFAULT_HEARTBEAT_INTERVAL, DEFAULT_MAX_CONSECUTIVE_HEARTBEAT_FAILURES, HeartbeatRunner,
 };
