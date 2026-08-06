@@ -6,7 +6,7 @@ use std::{
 
 use crate::{error::ExecutionError, id::WorkflowTaskId, workflow::WorkflowTask};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowDefinition {
     #[serde(default, with = "crate::serde_util::duration_secs_opt")]
     timeout: Option<Duration>,

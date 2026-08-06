@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::{error::ExecutionError, id::WorkflowId};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Workflow {
     id: WorkflowId,
     name: String,

@@ -5,7 +5,10 @@ use crate::{
     workflow::{Workflow, WorkflowDefinition, WorkflowTask},
 };
 
-use super::{dto::WorkflowSpec, error::SpecError};
+use super::{
+    dto::{TaskConfigSpec, WorkflowSpec},
+    error::SpecError,
+};
 
 pub fn lower(spec: WorkflowSpec) -> Result<(Workflow, WorkflowDefinition), SpecError> {
     let name_to_id: HashMap<String, WorkflowTaskId> = spec
@@ -30,7 +33,11 @@ pub fn lower(spec: WorkflowSpec) -> Result<(Workflow, WorkflowDefinition), SpecE
             })
             .collect::<Result<Vec<_>, _>>()?;
 
-        let mut task = WorkflowTask::new(id, task_spec.task_type.clone(), dependencies)?;
+        let task_type = task_type_name(&task_spec.config);
+        let config = serde_json::to_value(&task_spec.config)?;
+
+        let mut task = WorkflowTask::new(id, task_type.to_owned(), dependencies)?;
+        task = task.with_config(config);
 
         if let Some(timeout) = task_spec.timeout {
             task = task.with_timeout(Duration::from_secs(timeout));
@@ -43,10 +50,19 @@ pub fn lower(spec: WorkflowSpec) -> Result<(Workflow, WorkflowDefinition), SpecE
 
     if let Some(timeout) = spec.timeout {
         definition = definition.with_timeout(Duration::from_secs(timeout));
-    };
+    }
 
     let mut workflow = Workflow::new(spec.name)?;
     workflow.add_version(definition.clone())?;
 
     Ok((workflow, definition))
+}
+
+fn task_type_name(config: &TaskConfigSpec) -> &'static str {
+    match config {
+        TaskConfigSpec::Shell { .. } => "shell",
+        TaskConfigSpec::Http { .. } => "http",
+        TaskConfigSpec::Wait { .. } => "wait",
+        TaskConfigSpec::Noop { .. } => "noop",
+    }
 }

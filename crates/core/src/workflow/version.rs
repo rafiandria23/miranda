@@ -6,7 +6,7 @@ use crate::{
     workflow::WorkflowDefinition,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowVersion {
     id: WorkflowVersionId,
     workflow_id: WorkflowId,

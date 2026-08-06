@@ -3,13 +3,16 @@ use std::{collections::HashSet, time::Duration};
 
 use crate::{error::ExecutionError, id::WorkflowTaskId};
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct WorkflowTask {
     id: WorkflowTaskId,
     task_type: String,
 
     #[serde(default, with = "crate::serde_util::duration_secs_opt")]
     timeout: Option<Duration>,
+
+    #[serde(default)]
+    config: serde_json::Value,
 
     dependencies: Vec<WorkflowTaskId>,
 }
@@ -24,6 +27,7 @@ impl WorkflowTask {
             id,
             task_type,
             timeout: None,
+            config: serde_json::Value::Null,
             dependencies,
         };
 
@@ -38,6 +42,15 @@ impl WorkflowTask {
 
     pub fn timeout(&self) -> Option<Duration> {
         self.timeout
+    }
+
+    pub fn with_config(mut self, config: serde_json::Value) -> Self {
+        self.config = config;
+        self
+    }
+
+    pub fn config(&self) -> &serde_json::Value {
+        &self.config
     }
 
     pub fn id(&self) -> WorkflowTaskId {
