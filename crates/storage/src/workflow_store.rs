@@ -5,7 +5,7 @@ use miranda_core::{
 };
 use std::future::Future;
 
-use crate::error::StorageError;
+use crate::StorageError;
 
 pub trait WorkflowStore: Send + Sync {
     fn save_definition(

@@ -12,6 +12,12 @@ pub enum StorageError {
     #[error("execution not found: {0}")]
     ExecutionNotFound(ExecutionId),
 
+    #[error("snapshot not found for execution {execution_id}, version {version}")]
+    SnapshotNotFound {
+        execution_id: ExecutionId,
+        version: u64,
+    },
+
     #[error("concurrency conflict for execution {id}: expected version {expected}, found {actual}")]
     OptimisticLockFailed {
         id: ExecutionId,
