@@ -5,7 +5,7 @@ use miranda_core::{
 };
 use miranda_storage::WorkflowStore;
 use miranda_worker::TaskExecutor;
-use tracing::{error, info, instrument};
+use tracing::{debug, error, info, instrument};
 
 use crate::{
     EngineError,
@@ -70,19 +70,47 @@ where
 
                 NextAction::RunTasks(ready) => {
                     for workflow_task_id in ready {
+                        let workflow_task = definition
+                            .task(workflow_task_id)
+                            .expect("ready task must exist in definition");
+
+                        if workflow_task.task_type() == "noop" {
+                            debug!(task_id = %workflow_task_id, "noop task, completing without dispatch");
+
+                            execution.apply(
+                                Event::new(
+                                    execution.id(),
+                                    EventPayload::TaskStarted { workflow_task_id },
+                                ),
+                                definition,
+                            )?;
+                            execution.apply(
+                                Event::new(
+                                    execution.id(),
+                                    EventPayload::TaskCompleted { workflow_task_id },
+                                ),
+                                definition,
+                            )?;
+
+                            self.store.update_execution(&execution, version).await?;
+                            version += 1;
+
+                            continue;
+                        }
+
                         loop {
                             let result = dispatcher
                                 .dispatch(&mut execution, definition, workflow_task_id)
                                 .await?;
 
-                            let outcome = outcome
+                            let outcome_result = outcome
                                 .apply(&mut execution, definition, workflow_task_id, result)
                                 .await;
 
                             self.store.update_execution(&execution, version).await?;
                             version += 1;
 
-                            match outcome? {
+                            match outcome_result? {
                                 TaskOutcomeResult::Completed => break,
                                 TaskOutcomeResult::Retried => continue,
                             }
@@ -162,6 +190,10 @@ mod tests {
 
     fn task(id: WorkflowTaskId, dependencies: Vec<WorkflowTaskId>) -> WorkflowTask {
         WorkflowTask::new(id, "send_email".to_owned(), dependencies).unwrap()
+    }
+
+    fn noop_task(id: WorkflowTaskId, dependencies: Vec<WorkflowTaskId>) -> WorkflowTask {
+        WorkflowTask::new(id, "noop".to_owned(), dependencies).unwrap()
     }
 
     fn new_execution() -> Execution {
@@ -284,5 +316,50 @@ mod tests {
 
         assert_eq!(result.status(), ExecutionStatus::Completed);
         assert!(calls.call_order().is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_completes_a_noop_task_without_dispatching_it() {
+        let task_id = WorkflowTaskId::new();
+        let definition = WorkflowDefinition::new(vec![noop_task(task_id, vec![])]).unwrap();
+        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+
+        let (executor, calls) = scripted_executor(vec![]);
+        let store = MemoryStore::new();
+        let engine = EmbeddedEngine::new(executor, store);
+
+        let result = engine.run(execution, &definition).await.unwrap();
+
+        assert_eq!(result.status(), ExecutionStatus::Completed);
+        assert_eq!(
+            result.task(task_id).unwrap().status(),
+            miranda_core::execution::TaskStatus::Completed
+        );
+        assert!(calls.call_order().is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_executes_dispatched_tasks_after_a_noop_dependency() {
+        let noop_id = WorkflowTaskId::new();
+        let task_id = WorkflowTaskId::new();
+        let definition = WorkflowDefinition::new(vec![
+            noop_task(noop_id, vec![]),
+            task(task_id, vec![noop_id]),
+        ])
+        .unwrap();
+        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+
+        let (executor, calls) = scripted_executor(vec![Ok(())]);
+        let store = MemoryStore::new();
+        let engine = EmbeddedEngine::new(executor, store);
+
+        let result = engine.run(execution, &definition).await.unwrap();
+
+        assert_eq!(result.status(), ExecutionStatus::Completed);
+        assert_eq!(
+            result.task(noop_id).unwrap().status(),
+            miranda_core::execution::TaskStatus::Completed
+        );
+        assert_eq!(calls.call_order(), vec![task_id]);
     }
 }
