@@ -1,14 +1,32 @@
 use miranda_core::spec::dto::{HttpMethod as SpecHttpMethod, TaskConfigSpec};
 use reqwest::{Client as HttpClient, Method as HttpMethod};
+use std::time::Duration;
 
 use crate::{TaskExecutor, WorkerError};
 
-pub struct HttpExecutor;
+pub struct HttpExecutor {
+    client: HttpClient,
+}
+
+impl HttpExecutor {
+    pub fn new() -> Self {
+        Self {
+            client: HttpClient::new(),
+        }
+    }
+}
+
+impl Default for HttpExecutor {
+    fn default() -> Self {
+        Self::new()
+    }
+}
 
 impl TaskExecutor for HttpExecutor {
     async fn execute(
         &self,
         task: &miranda_core::workflow::WorkflowTask,
+        timeout: Option<Duration>,
     ) -> Result<(), WorkerError> {
         let config: TaskConfigSpec =
             serde_json::from_value(task.config().clone()).map_err(|e| {
@@ -31,12 +49,16 @@ impl TaskExecutor for HttpExecutor {
             });
         };
 
-        let client = HttpClient::new();
-        let mut request = client
+        let mut request = self
+            .client
             .request(to_reqwest_method(method), &url)
             .query(&query);
 
-        for (key, value) in headers {
+        if let Some(duration) = timeout {
+            request = request.timeout(duration);
+        }
+
+        for (key, value) in &headers {
             request = request.header(key, value);
         }
 

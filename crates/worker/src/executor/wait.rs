@@ -7,7 +7,11 @@ use crate::{TaskExecutor, WorkerError};
 pub struct WaitExecutor;
 
 impl TaskExecutor for WaitExecutor {
-    async fn execute(&self, task: &WorkflowTask) -> Result<(), WorkerError> {
+    async fn execute(
+        &self,
+        task: &WorkflowTask,
+        _timeout: Option<Duration>,
+    ) -> Result<(), WorkerError> {
         let config: TaskConfigSpec =
             serde_json::from_value(task.config().clone()).map_err(|e| {
                 WorkerError::ExecutionFailed {

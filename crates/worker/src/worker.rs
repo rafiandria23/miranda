@@ -287,7 +287,7 @@ async fn execute_and_report<C: ControlPlaneClient, E: TaskExecutor>(
 
     active_leases.write().await.insert(lease_token.clone(), ());
 
-    let result = executor.execute(&assignment.task).await;
+    let result = executor.execute(&assignment.task, assignment.timeout).await;
 
     active_leases.write().await.remove(&lease_token);
 

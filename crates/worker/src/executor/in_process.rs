@@ -1,5 +1,5 @@
 use miranda_core::workflow::WorkflowTask;
-use std::future::Future;
+use std::{future::Future, time::Duration};
 
 use crate::{TaskExecutor, WorkerError};
 
@@ -18,7 +18,11 @@ where
     F: Fn(&WorkflowTask) -> Fut + Send + Sync,
     Fut: Future<Output = Result<(), WorkerError>> + Send,
 {
-    async fn execute(&self, task: &WorkflowTask) -> Result<(), WorkerError> {
+    async fn execute(
+        &self,
+        task: &WorkflowTask,
+        _timeout: Option<Duration>,
+    ) -> Result<(), WorkerError> {
         (self.handler)(task).await
     }
 }

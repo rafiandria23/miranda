@@ -1,11 +1,12 @@
 use miranda_core::{id::WorkerId, workflow::WorkflowTask};
-use std::{collections::HashSet, future::Future};
+use std::{collections::HashSet, future::Future, time::Duration};
 
 use crate::WorkerError;
 
 pub struct TaskAssignment {
-    pub task: WorkflowTask,
     pub lease_token: String,
+    pub timeout: Option<Duration>,
+    pub task: WorkflowTask,
 }
 
 pub trait ControlPlaneClient: Send + Sync + 'static {

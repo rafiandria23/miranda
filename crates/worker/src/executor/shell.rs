@@ -1,6 +1,6 @@
 use miranda_core::{spec::dto::TaskConfigSpec, workflow::WorkflowTask};
-use std::process::Stdio;
-use tokio::process::Command;
+use std::{process::Stdio, time::Duration};
+use tokio::{io::AsyncReadExt, process::Command};
 use tracing::debug;
 
 use crate::{TaskExecutor, WorkerError};
@@ -8,7 +8,11 @@ use crate::{TaskExecutor, WorkerError};
 pub struct ShellExecutor;
 
 impl TaskExecutor for ShellExecutor {
-    async fn execute(&self, task: &WorkflowTask) -> Result<(), WorkerError> {
+    async fn execute(
+        &self,
+        task: &WorkflowTask,
+        timeout: Option<Duration>,
+    ) -> Result<(), WorkerError> {
         let config: TaskConfigSpec =
             serde_json::from_value(task.config().clone()).map_err(|e| {
                 WorkerError::ExecutionFailed {
@@ -33,29 +37,64 @@ impl TaskExecutor for ShellExecutor {
 
         let mut cmd = Command::new(&shell_bin);
         cmd.arg("-c").arg(&command);
-        cmd.envs(&env);
+        cmd.envs(env);
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
+        cmd.kill_on_drop(true);
 
         if let Some(cwd) = &cwd {
             cmd.current_dir(cwd);
         }
 
-        let output = cmd
-            .output()
-            .await
-            .map_err(|e| WorkerError::ExecutionFailed {
-                message: format!("failed to spawn shell: {e}"),
-            })?;
+        let mut child = cmd.spawn().map_err(|e| WorkerError::ExecutionFailed {
+            message: format!("failed to spawn shell: {e}"),
+        })?;
 
-        let exit_code = output.status.code().unwrap_or(-1);
+        let mut stdout_pipe = child.stdout.take();
+        let mut stderr_pipe = child.stderr.take();
 
-        if !output.stdout.is_empty() {
-            debug!(stdout = %String::from_utf8_lossy(&output.stdout), "shell task stdout");
+        let status = match timeout {
+            Some(duration) => match tokio::time::timeout(duration, child.wait()).await {
+                Ok(result) => result.map_err(|e| WorkerError::ExecutionFailed {
+                    message: format!("failed to wait for shell: {e}"),
+                })?,
+
+                Err(_elapsed) => {
+                    let _ = child.start_kill();
+
+                    return Err(WorkerError::Timeout {
+                        duration: duration.as_millis() as u64,
+                    });
+                }
+            },
+
+            None => child
+                .wait()
+                .await
+                .map_err(|e| WorkerError::ExecutionFailed {
+                    message: format!("failed to wait for shell: {e}"),
+                })?,
+        };
+
+        let mut stdout = Vec::new();
+        let mut stderr = Vec::new();
+
+        if let Some(pipe) = stdout_pipe.as_mut() {
+            let _ = pipe.read_to_end(&mut stdout).await;
         }
 
-        if !output.stderr.is_empty() {
-            debug!(stderr = %String::from_utf8_lossy(&output.stderr), "shell task stderr");
+        if let Some(pipe) = stderr_pipe.as_mut() {
+            let _ = pipe.read_to_end(&mut stderr).await;
+        }
+
+        let exit_code = status.code().unwrap_or(-1);
+
+        if !stdout.is_empty() {
+            debug!(stdout = %String::from_utf8_lossy(&stdout), "shell task stdout");
+        }
+
+        if !stderr.is_empty() {
+            debug!(stderr = %String::from_utf8_lossy(&stderr), "shell task stderr");
         }
 
         let succeeded = exit_code >= 0

@@ -53,7 +53,9 @@ where
             .task(workflow_task_id)
             .expect("ready task must exist in definition");
 
-        Ok(self.executor.execute(workflow_task).await)
+        let timeout = definition.effective_timeout(workflow_task);
+
+        Ok(self.executor.execute(workflow_task, timeout).await)
     }
 }
 

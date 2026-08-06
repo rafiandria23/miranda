@@ -23,7 +23,7 @@ pub async fn run_from_yaml(yaml: &str) -> Result<(), Box<dyn Error>> {
     })
     .await?;
 
-    let engine = EmbeddedEngine::new(DispatchExecutor, store);
+    let engine = EmbeddedEngine::new(DispatchExecutor::new(), store);
 
     let result = engine.run(execution, &definition).await?;
 

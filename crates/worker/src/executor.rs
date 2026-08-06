@@ -13,10 +13,14 @@ pub use shell::ShellExecutor;
 pub use wait::WaitExecutor;
 
 use miranda_core::workflow::WorkflowTask;
-use std::future::Future;
+use std::{future::Future, time::Duration};
 
 use crate::WorkerError;
 
 pub trait TaskExecutor: Send + Sync {
-    fn execute(&self, task: &WorkflowTask) -> impl Future<Output = Result<(), WorkerError>> + Send;
+    fn execute(
+        &self,
+        task: &WorkflowTask,
+        timeout: Option<Duration>,
+    ) -> impl Future<Output = Result<(), WorkerError>> + Send;
 }
