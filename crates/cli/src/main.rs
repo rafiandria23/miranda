@@ -1,11 +1,12 @@
 mod cli;
 mod config_dir;
+mod db;
 mod run;
 
 use clap::Parser;
 use std::{error::Error, path::Path, process::ExitCode};
 
-use crate::cli::{Cli, Command};
+use crate::cli::{Cli, Command, DbCommand};
 
 #[tokio::main]
 async fn main() -> ExitCode {
@@ -13,8 +14,15 @@ async fn main() -> ExitCode {
 
     let args = Cli::parse();
 
-    let result = match args.command {
+    let result: Result<(), Box<dyn Error>> = match args.command {
         Command::Run { path } => run_workflow(&path).await,
+
+        Command::Db(DbCommand::Create { database_url }) => db::create(&database_url).await,
+        Command::Db(DbCommand::Migrate { database_url }) => db::migrate(&database_url).await,
+
+        Command::Submit { .. } | Command::Register { .. } | Command::Status { .. } => {
+            Err("this command requires miranda-server, which does not exist yet".into())
+        }
     };
 
     match result {
