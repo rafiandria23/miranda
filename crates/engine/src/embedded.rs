@@ -110,7 +110,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, sync::Mutex, time::Duration};
+    use std::{collections::VecDeque, sync::Arc, sync::Mutex, time::Duration};
 
     use miranda_core::{
         execution::ExecutionStatus,
@@ -118,43 +118,46 @@ mod tests {
         workflow::WorkflowTask,
     };
     use miranda_storage::MemoryStore;
-    use miranda_worker::WorkerError;
+    use miranda_worker::{InProcessExecutor, WorkerError};
 
     use crate::retry::Backoff;
 
     use super::*;
 
-    struct ScriptedExecutor {
-        results: Mutex<VecDeque<Result<(), WorkerError>>>,
-        calls: Mutex<Vec<WorkflowTaskId>>,
-    }
+    struct CallLog(Mutex<Vec<WorkflowTaskId>>);
 
-    impl ScriptedExecutor {
-        fn new(results: Vec<Result<(), WorkerError>>) -> Self {
-            Self {
-                results: Mutex::new(results.into()),
-                calls: Mutex::new(Vec::new()),
-            }
-        }
-
+    impl CallLog {
         fn call_order(&self) -> Vec<WorkflowTaskId> {
-            self.calls.lock().unwrap().clone()
+            self.0.lock().unwrap().clone()
         }
     }
 
-    impl TaskExecutor for ScriptedExecutor {
-        async fn execute(
-            &self,
-            task: &miranda_core::workflow::WorkflowTask,
-        ) -> Result<(), WorkerError> {
-            self.calls.lock().unwrap().push(task.id());
+    type BoxFuture =
+        std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), WorkerError>> + Send>>;
 
-            self.results
+    fn scripted_executor(
+        results: Vec<Result<(), WorkerError>>,
+    ) -> (
+        InProcessExecutor<impl Fn(&WorkflowTask) -> BoxFuture + Send + Sync>,
+        Arc<CallLog>,
+    ) {
+        let calls = Arc::new(CallLog(Mutex::new(Vec::new())));
+        let log = calls.clone();
+        let results = Arc::new(Mutex::new(VecDeque::from(results)));
+
+        let executor = InProcessExecutor::new(move |task: &WorkflowTask| {
+            log.0.lock().unwrap().push(task.id());
+
+            let result = results
                 .lock()
                 .unwrap()
                 .pop_front()
-                .expect("scripted executor ran out of results")
-        }
+                .expect("scripted executor ran out of results");
+
+            Box::pin(async move { result }) as BoxFuture
+        });
+
+        (executor, calls)
     }
 
     fn task(id: WorkflowTaskId, dependencies: Vec<WorkflowTaskId>) -> WorkflowTask {
@@ -171,7 +174,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![task(task_id, vec![])]).unwrap();
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
-        let executor = ScriptedExecutor::new(vec![Ok(())]);
+        let (executor, _calls) = scripted_executor(vec![Ok(())]);
         let store = MemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
@@ -195,14 +198,14 @@ mod tests {
         .unwrap();
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
-        let executor = ScriptedExecutor::new(vec![Ok(()), Ok(())]);
+        let (executor, calls) = scripted_executor(vec![Ok(()), Ok(())]);
         let store = MemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         let result = engine.run(execution, &definition).await.unwrap();
 
         assert_eq!(result.status(), ExecutionStatus::Completed);
-        assert_eq!(engine.executor.call_order(), vec![dependency_id, task_id]);
+        assert_eq!(calls.call_order(), vec![dependency_id, task_id]);
     }
 
     #[tokio::test]
@@ -211,7 +214,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![task(task_id, vec![])]).unwrap();
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
-        let executor = ScriptedExecutor::new(vec![
+        let (executor, calls) = scripted_executor(vec![
             Err(WorkerError::ExecutionFailed {
                 message: "transient".to_owned(),
             }),
@@ -224,7 +227,7 @@ mod tests {
         let result = engine.run(execution, &definition).await.unwrap();
 
         assert_eq!(result.status(), ExecutionStatus::Completed);
-        assert_eq!(engine.executor.call_order().len(), 2);
+        assert_eq!(calls.call_order().len(), 2);
     }
 
     #[tokio::test]
@@ -233,7 +236,7 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![task(task_id, vec![])]).unwrap();
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
-        let executor = ScriptedExecutor::new(vec![Err(WorkerError::ExecutionFailed {
+        let (executor, _calls) = scripted_executor(vec![Err(WorkerError::ExecutionFailed {
             message: "fatal".to_owned(),
         })]);
         let store = MemoryStore::new();
@@ -258,7 +261,7 @@ mod tests {
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
         let execution_id = execution.id();
 
-        let executor = ScriptedExecutor::new(vec![Ok(())]);
+        let (executor, _calls) = scripted_executor(vec![Ok(())]);
         let store = MemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
@@ -273,13 +276,13 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![]).unwrap();
         let execution = new_execution();
 
-        let executor = ScriptedExecutor::new(vec![]);
+        let (executor, calls) = scripted_executor(vec![]);
         let store = MemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         let result = engine.run(execution, &definition).await.unwrap();
 
         assert_eq!(result.status(), ExecutionStatus::Completed);
-        assert!(engine.executor.call_order().is_empty());
+        assert!(calls.call_order().is_empty());
     }
 }

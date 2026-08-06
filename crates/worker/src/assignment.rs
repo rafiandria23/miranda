@@ -5,8 +5,8 @@ use crate::WorkerError;
 
 pub struct TaskAssignment {
     pub lease_token: String,
-    pub timeout: Option<Duration>,
     pub task: WorkflowTask,
+    pub timeout: Option<Duration>,
 }
 
 pub trait ControlPlaneClient: Send + Sync + 'static {

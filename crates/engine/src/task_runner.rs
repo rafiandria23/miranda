@@ -163,9 +163,14 @@ mod tests {
         error::ExecutionError, execution::ExecutionStatus, id::WorkflowVersionId,
         workflow::WorkflowTask,
     };
-    use miranda_worker::TaskExecutor;
+    use miranda_worker::InProcessExecutor;
     use std::{
-        sync::atomic::{AtomicUsize, Ordering},
+        future::Future,
+        pin::Pin,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
         time::Duration,
     };
 
@@ -173,30 +178,25 @@ mod tests {
 
     use super::*;
 
-    struct FakeExecutor {
+    fn fake_executor(
         result: Result<(), WorkerError>,
-        calls: AtomicUsize,
+    ) -> (
+        InProcessExecutor<impl Fn(&WorkflowTask) -> BoxFuture + Send + Sync>,
+        Arc<AtomicUsize>,
+    ) {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
+
+        let executor = InProcessExecutor::new(move |_task: &WorkflowTask| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            let result = result.clone();
+            Box::pin(async move { result }) as BoxFuture
+        });
+
+        (executor, calls)
     }
 
-    impl FakeExecutor {
-        fn new(result: Result<(), WorkerError>) -> Self {
-            Self {
-                result,
-                calls: AtomicUsize::new(0),
-            }
-        }
-
-        fn calls(&self) -> usize {
-            self.calls.load(Ordering::SeqCst)
-        }
-    }
-
-    impl TaskExecutor for FakeExecutor {
-        async fn execute(&self, _task: &WorkflowTask) -> Result<(), WorkerError> {
-            self.calls.fetch_add(1, Ordering::SeqCst);
-            self.result.clone()
-        }
-    }
+    type BoxFuture = Pin<Box<dyn Future<Output = Result<(), WorkerError>> + Send>>;
 
     fn single_task_definition() -> (WorkflowDefinition, WorkflowTaskId) {
         let task_id = WorkflowTaskId::new();
@@ -222,7 +222,7 @@ mod tests {
             let (definition, task_id) = single_task_definition();
             let mut execution = running_execution(&definition);
 
-            let executor = FakeExecutor::new(Ok(()));
+            let (executor, _calls) = fake_executor(Ok(()));
             let dispatcher = TaskDispatcher::new(&executor);
 
             let result = dispatcher
@@ -244,7 +244,7 @@ mod tests {
             execution.start_task(task_id, &definition).unwrap();
             execution.fail_task(task_id).unwrap();
 
-            let executor = FakeExecutor::new(Ok(()));
+            let (executor, _calls) = fake_executor(Ok(()));
             let dispatcher = TaskDispatcher::new(&executor);
 
             let result = dispatcher
@@ -264,7 +264,7 @@ mod tests {
             let (definition, task_id) = single_task_definition();
             let mut execution = running_execution(&definition);
 
-            let executor = FakeExecutor::new(Err(WorkerError::ExecutionFailed {
+            let (executor, _calls) = fake_executor(Err(WorkerError::ExecutionFailed {
                 message: "boom".to_owned(),
             }));
             let dispatcher = TaskDispatcher::new(&executor);
@@ -288,7 +288,7 @@ mod tests {
             let mut execution = running_execution(&definition);
 
             let unknown_id = WorkflowTaskId::new();
-            let executor = FakeExecutor::new(Ok(()));
+            let (executor, _calls) = fake_executor(Ok(()));
             let dispatcher = TaskDispatcher::new(&executor);
 
             let err = dispatcher
@@ -308,7 +308,7 @@ mod tests {
             let mut execution = running_execution(&definition);
             execution.start_task(task_id, &definition).unwrap();
 
-            let executor = FakeExecutor::new(Ok(()));
+            let (executor, _calls) = fake_executor(Ok(()));
             let dispatcher = TaskDispatcher::new(&executor);
 
             let err = dispatcher
@@ -329,7 +329,7 @@ mod tests {
             execution.start_task(task_id, &definition).unwrap();
             execution.complete_task(task_id).unwrap();
 
-            let executor = FakeExecutor::new(Ok(()));
+            let (executor, _calls) = fake_executor(Ok(()));
             let dispatcher = TaskDispatcher::new(&executor);
 
             let err = dispatcher
@@ -484,7 +484,7 @@ mod tests {
             let (definition, task_id) = single_task_definition();
             let mut execution = running_execution(&definition);
 
-            let executor = FakeExecutor::new(Err(WorkerError::ExecutionFailed {
+            let (executor, calls) = fake_executor(Err(WorkerError::ExecutionFailed {
                 message: "always fails".to_owned(),
             }));
             let dispatcher = TaskDispatcher::new(&executor);
@@ -511,7 +511,7 @@ mod tests {
                 .unwrap_err();
 
             assert!(matches!(err, EngineError::ExecutionFailed(_)));
-            assert_eq!(executor.calls(), 2);
+            assert_eq!(calls.load(Ordering::SeqCst), 2);
         }
     }
 }

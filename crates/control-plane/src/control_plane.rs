@@ -149,9 +149,12 @@ where
             .expect("dequeued task must exist in its own definition")
             .clone();
 
+        let timeout = item.definition.effective_timeout(&workflow_task);
+
         Ok(Some(TaskAssignment {
-            task: workflow_task,
             lease_token: lease_token.0,
+            task: workflow_task,
+            timeout,
         }))
     }
 
