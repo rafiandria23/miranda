@@ -8,3 +8,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 uuid = { workspace = true }
+yaml_serde = { workspace = true, optional = true }
+
+[features]
+default = []
+spec = ["dep:yaml_serde"]

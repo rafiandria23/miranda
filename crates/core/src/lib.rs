@@ -2,7 +2,10 @@ pub mod error;
 pub mod event;
 pub mod execution;
 pub mod id;
+pub mod serde_util;
 pub mod workflow;
 
-// Re-export root errors for convenience
+#[cfg(feature = "spec")]
+pub mod spec;
+
 pub use error::ExecutionError;

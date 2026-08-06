@@ -4,3 +4,19 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+miranda-core = { path = "../core", features = ["spec"] }
+miranda-engine = { path = "../engine" }
+miranda-storage = { path = "../storage" }
+miranda-storage-mysql = { path = "../storage-mysql" }
+miranda-storage-postgres = { path = "../storage-postgres" }
+miranda-storage-sqlite = { path = "../storage-sqlite" }
+miranda-worker = { path = "../worker" }
+
+serde = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+
+clap = { version = "4.6.5", features = ["derive"] }
+dirs = { version = "6.0.0" }

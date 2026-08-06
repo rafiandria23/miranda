@@ -1,18 +1,42 @@
 use serde::{Deserialize, Serialize};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    time::Duration,
+};
 
 use crate::{error::ExecutionError, id::WorkflowTaskId, workflow::WorkflowTask};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WorkflowDefinition {
+    #[serde(default, with = "crate::serde_util::duration_secs_opt")]
+    timeout: Option<Duration>,
+
     tasks: Vec<WorkflowTask>,
 }
 
 impl WorkflowDefinition {
     pub fn new(tasks: Vec<WorkflowTask>) -> Result<Self, ExecutionError> {
-        let definition = Self { tasks };
+        let definition = Self {
+            timeout: None,
+            tasks,
+        };
+
         definition.validate()?;
+
         Ok(definition)
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub fn timeout(&self) -> Option<Duration> {
+        self.timeout
+    }
+
+    pub fn effective_timeout(&self, task: &WorkflowTask) -> Option<Duration> {
+        task.timeout().or(self.timeout)
     }
 
     pub fn tasks(&self) -> &[WorkflowTask] {
@@ -20,13 +44,14 @@ impl WorkflowDefinition {
     }
 
     pub fn task(&self, task_id: WorkflowTaskId) -> Option<&WorkflowTask> {
-        self.tasks.iter().find(|task| task.id() == task_id)
+        self.tasks.iter().find(|t| t.id() == task_id)
     }
 
     pub fn validate(&self) -> Result<(), ExecutionError> {
         self.validate_task_ids()?;
         self.validate_task_dependencies()?;
         self.validate_task_dependency_cycles()?;
+
         Ok(())
     }
 
@@ -43,7 +68,7 @@ impl WorkflowDefinition {
     }
 
     fn validate_task_dependencies(&self) -> Result<(), ExecutionError> {
-        let task_ids: HashSet<_> = self.tasks.iter().map(|task| task.id()).collect();
+        let task_ids: HashSet<_> = self.tasks.iter().map(|t| t.id()).collect();
 
         for task in &self.tasks {
             for dependency in task.dependencies() {
@@ -57,7 +82,7 @@ impl WorkflowDefinition {
     }
 
     fn validate_task_dependency_cycles(&self) -> Result<(), ExecutionError> {
-        let tasks: HashMap<_, _> = self.tasks.iter().map(|task| (task.id(), task)).collect();
+        let tasks: HashMap<_, _> = self.tasks.iter().map(|t| (t.id(), t)).collect();
 
         let mut visiting = HashSet::new();
         let mut visited = HashSet::new();
@@ -224,5 +249,85 @@ mod tests {
         let deserialized: WorkflowDefinition = serde_json::from_str(&json).unwrap();
 
         assert_eq!(definition, deserialized);
+    }
+
+    #[test]
+    fn new_defaults_timeout_to_none() {
+        let definition = WorkflowDefinition::new(vec![]).unwrap();
+
+        assert_eq!(definition.timeout(), None);
+    }
+
+    #[test]
+    fn with_timeout_sets_the_timeout() {
+        let definition = WorkflowDefinition::new(vec![])
+            .unwrap()
+            .with_timeout(Duration::from_secs(30));
+
+        assert_eq!(definition.timeout(), Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn workflow_definition_with_timeout_round_trips_through_json() {
+        let definition = WorkflowDefinition::new(vec![])
+            .unwrap()
+            .with_timeout(Duration::from_secs(30));
+
+        let json = serde_json::to_string(&definition).unwrap();
+        let deserialized: WorkflowDefinition = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(definition, deserialized);
+        assert_eq!(deserialized.timeout(), Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn workflow_definition_without_timeout_omits_it_from_json() {
+        let definition = WorkflowDefinition::new(vec![]).unwrap();
+
+        let json = serde_json::to_value(&definition).unwrap();
+
+        assert_eq!(json["timeout"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn workflow_definition_deserializes_without_timeout_field() {
+        let deserialized: WorkflowDefinition = serde_json::from_str(r#"{"tasks":[]}"#).unwrap();
+
+        assert_eq!(deserialized.timeout(), None);
+    }
+
+    #[test]
+    fn effective_timeout_returns_none_when_neither_set() {
+        let workflow_task = task(WorkflowTaskId::new(), vec![]);
+        let definition = WorkflowDefinition::new(vec![workflow_task.clone()]).unwrap();
+
+        assert_eq!(definition.effective_timeout(&workflow_task), None);
+    }
+
+    #[test]
+    fn effective_timeout_falls_back_to_definition_timeout() {
+        let workflow_task = task(WorkflowTaskId::new(), vec![]);
+        let definition = WorkflowDefinition::new(vec![workflow_task.clone()])
+            .unwrap()
+            .with_timeout(Duration::from_secs(60));
+
+        assert_eq!(
+            definition.effective_timeout(&workflow_task),
+            Some(Duration::from_secs(60))
+        );
+    }
+
+    #[test]
+    fn effective_timeout_prefers_task_timeout_over_definition_timeout() {
+        let workflow_task =
+            task(WorkflowTaskId::new(), vec![]).with_timeout(Duration::from_secs(10));
+        let definition = WorkflowDefinition::new(vec![workflow_task.clone()])
+            .unwrap()
+            .with_timeout(Duration::from_secs(60));
+
+        assert_eq!(
+            definition.effective_timeout(&workflow_task),
+            Some(Duration::from_secs(10))
+        );
     }
 }

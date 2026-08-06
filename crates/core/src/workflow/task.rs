@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashSet;
+use std::{collections::HashSet, time::Duration};
 
 use crate::{error::ExecutionError, id::WorkflowTaskId};
 
@@ -7,6 +7,10 @@ use crate::{error::ExecutionError, id::WorkflowTaskId};
 pub struct WorkflowTask {
     id: WorkflowTaskId,
     task_type: String,
+
+    #[serde(default, with = "crate::serde_util::duration_secs_opt")]
+    timeout: Option<Duration>,
+
     dependencies: Vec<WorkflowTaskId>,
 }
 
@@ -19,11 +23,21 @@ impl WorkflowTask {
         let task = Self {
             id,
             task_type,
+            timeout: None,
             dependencies,
         };
 
         task.validate()?;
         Ok(task)
+    }
+
+    pub fn with_timeout(mut self, timeout: Duration) -> Self {
+        self.timeout = Some(timeout);
+        self
+    }
+
+    pub fn timeout(&self) -> Option<Duration> {
+        self.timeout
     }
 
     pub fn id(&self) -> WorkflowTaskId {
@@ -168,5 +182,58 @@ mod tests {
         let deserialized: WorkflowTask = serde_json::from_str(&json).unwrap();
 
         assert_eq!(task, deserialized);
+    }
+
+    #[test]
+    fn new_defaults_timeout_to_none() {
+        let task =
+            WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![]).unwrap();
+
+        assert_eq!(task.timeout(), None);
+    }
+
+    #[test]
+    fn with_timeout_sets_the_timeout() {
+        let task = WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![])
+            .unwrap()
+            .with_timeout(Duration::from_secs(30));
+
+        assert_eq!(task.timeout(), Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn workflow_task_with_timeout_round_trips_through_json() {
+        let task = WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![])
+            .unwrap()
+            .with_timeout(Duration::from_secs(30));
+
+        let json = serde_json::to_string(&task).unwrap();
+        let deserialized: WorkflowTask = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(task, deserialized);
+        assert_eq!(deserialized.timeout(), Some(Duration::from_secs(30)));
+    }
+
+    #[test]
+    fn workflow_task_without_timeout_omits_it_from_json() {
+        let task =
+            WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![]).unwrap();
+
+        let json = serde_json::to_value(&task).unwrap();
+
+        assert_eq!(json["timeout"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn workflow_task_deserializes_without_timeout_field() {
+        let id = WorkflowTaskId::new();
+        let json = format!(
+            r#"{{"id":"{}","task_type":"send_email","dependencies":[]}}"#,
+            id
+        );
+
+        let deserialized: WorkflowTask = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.timeout(), None);
     }
 }
