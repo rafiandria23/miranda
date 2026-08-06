@@ -71,6 +71,59 @@ where
         self
     }
 
+    async fn resolve_and_enqueue_ready(
+        &self,
+        mut execution: Execution,
+        mut version: u64,
+        definition: &Arc<WorkflowDefinition>,
+    ) -> Result<(Execution, u64), ControlPlaneError> {
+        loop {
+            let ready = execution.ready_tasks(definition);
+
+            let (noop_ready, dispatchable_ready): (Vec<_>, Vec<_>) =
+                ready.into_iter().partition(|t_id| {
+                    definition
+                        .task(*t_id)
+                        .map(|t| t.task_type() == "noop")
+                        .unwrap_or(false)
+                });
+
+            for workflow_task_id in &dispatchable_ready {
+                self.queue
+                    .enqueue(QueueItem {
+                        execution_id: execution.id(),
+                        workflow_task_id: *workflow_task_id,
+                        definition: definition.clone(),
+                    })
+                    .await?;
+            }
+
+            if noop_ready.is_empty() {
+                return Ok((execution, version));
+            }
+
+            for workflow_task_id in noop_ready {
+                execution.apply(
+                    Event::new(
+                        execution.id(),
+                        EventPayload::TaskStarted { workflow_task_id },
+                    ),
+                    definition,
+                )?;
+                execution.apply(
+                    Event::new(
+                        execution.id(),
+                        EventPayload::TaskCompleted { workflow_task_id },
+                    ),
+                    definition,
+                )?;
+            }
+
+            self.store.update_execution(&execution, version).await?;
+            version += 1;
+        }
+    }
+
     pub async fn submit_execution(
         &self,
         mut execution: Execution,
@@ -84,17 +137,12 @@ where
         self.store.save_execution(&execution).await?;
 
         let definition = Arc::new(definition);
-        let ready = execution.ready_tasks(&definition);
 
-        for workflow_task_id in ready {
-            self.queue
-                .enqueue(QueueItem {
-                    execution_id: execution.id(),
-                    workflow_task_id,
-                    definition: definition.clone(),
-                })
-                .await?;
-        }
+        let (execution, version) = self
+            .resolve_and_enqueue_ready(execution, 1, &definition)
+            .await?;
+
+        self.store.update_execution(&execution, version).await?;
 
         Ok(())
     }
@@ -181,6 +229,10 @@ where
             .await
         {
             Ok(TaskOutcomeResult::Completed) => {
+                let (execution, version) = self
+                    .resolve_and_enqueue_ready(execution, version, &definition)
+                    .await?;
+
                 self.store.update_execution(&execution, version).await?;
                 self.leases.release(&token).await?;
             }

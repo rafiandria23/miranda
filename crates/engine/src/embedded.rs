@@ -362,4 +362,58 @@ mod tests {
         );
         assert_eq!(calls.call_order(), vec![task_id]);
     }
+
+    #[tokio::test]
+    async fn run_completes_multiple_independent_noop_tasks() {
+        let first_noop_id = WorkflowTaskId::new();
+        let second_noop_id = WorkflowTaskId::new();
+        let definition = WorkflowDefinition::new(vec![
+            noop_task(first_noop_id, vec![]),
+            noop_task(second_noop_id, vec![]),
+        ])
+        .unwrap();
+        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+
+        let (executor, calls) = scripted_executor(vec![]);
+        let store = MemoryStore::new();
+        let engine = EmbeddedEngine::new(executor, store);
+
+        let result = engine.run(execution, &definition).await.unwrap();
+
+        assert_eq!(result.status(), ExecutionStatus::Completed);
+        assert_eq!(
+            result.task(first_noop_id).unwrap().status(),
+            miranda_core::execution::TaskStatus::Completed
+        );
+        assert_eq!(
+            result.task(second_noop_id).unwrap().status(),
+            miranda_core::execution::TaskStatus::Completed
+        );
+        assert!(calls.call_order().is_empty());
+    }
+
+    #[tokio::test]
+    async fn run_completes_a_noop_task_after_a_dispatched_dependency() {
+        let task_id = WorkflowTaskId::new();
+        let noop_id = WorkflowTaskId::new();
+        let definition = WorkflowDefinition::new(vec![
+            task(task_id, vec![]),
+            noop_task(noop_id, vec![task_id]),
+        ])
+        .unwrap();
+        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+
+        let (executor, calls) = scripted_executor(vec![Ok(())]);
+        let store = MemoryStore::new();
+        let engine = EmbeddedEngine::new(executor, store);
+
+        let result = engine.run(execution, &definition).await.unwrap();
+
+        assert_eq!(result.status(), ExecutionStatus::Completed);
+        assert_eq!(
+            result.task(noop_id).unwrap().status(),
+            miranda_core::execution::TaskStatus::Completed
+        );
+        assert_eq!(calls.call_order(), vec![task_id]);
+    }
 }
