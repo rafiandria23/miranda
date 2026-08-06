@@ -1,7 +1,7 @@
 use miranda_core::{
     event::{Event, EventPayload},
     execution::{Execution, TaskStatus},
-    id::{ExecutionId, WorkerId, WorkflowTaskId},
+    id::{ExecutionId, WorkerId, WorkflowId, WorkflowTaskId, WorkflowVersionId},
     workflow::WorkflowDefinition,
 };
 use miranda_engine::{
@@ -122,6 +122,24 @@ where
             self.store.update_execution(&execution, version).await?;
             version += 1;
         }
+    }
+
+    pub async fn register_workflow(
+        &self,
+        workflow_id: WorkflowId,
+        name: &str,
+        definition: &WorkflowDefinition,
+    ) -> Result<WorkflowVersionId, ControlPlaneError> {
+        let existing_versions = self.store.get_versions(workflow_id).await?;
+        let next_version = existing_versions.len() as u64 + 1;
+
+        let version_id = WorkflowVersionId::new();
+
+        self.store
+            .save_definition(workflow_id, name, version_id, next_version, definition)
+            .await?;
+
+        Ok(version_id)
     }
 
     pub async fn submit_execution(
@@ -447,6 +465,75 @@ mod tests {
         let definition = WorkflowDefinition::new(vec![dependency, task]).unwrap();
 
         (definition, dependency_id, task_id)
+    }
+
+    #[tokio::test]
+    async fn register_workflow_persists_first_version_and_returns_its_id() {
+        let (control_plane, _queue, _router, store) = harness();
+        let (definition, _task_id) = single_task_definition();
+        let workflow_id = miranda_core::id::WorkflowId::new();
+
+        let version_id = control_plane
+            .register_workflow(workflow_id, "test_workflow", &definition)
+            .await
+            .unwrap();
+
+        let versions = store.get_versions(workflow_id).await.unwrap();
+        assert_eq!(versions, vec![version_id]);
+
+        let stored = store.get_definition(version_id).await.unwrap();
+        assert_eq!(stored, definition);
+    }
+
+    #[tokio::test]
+    async fn register_workflow_appends_subsequent_versions_for_same_workflow() {
+        let (control_plane, _queue, _router, store) = harness();
+        let (first_definition, _task_id) = single_task_definition();
+        let (second_definition, _task_id) = single_task_definition();
+        let workflow_id = miranda_core::id::WorkflowId::new();
+
+        let first_version_id = control_plane
+            .register_workflow(workflow_id, "test_workflow", &first_definition)
+            .await
+            .unwrap();
+        let second_version_id = control_plane
+            .register_workflow(workflow_id, "test_workflow", &second_definition)
+            .await
+            .unwrap();
+
+        assert_ne!(first_version_id, second_version_id);
+
+        let mut versions = store.get_versions(workflow_id).await.unwrap();
+        versions.sort();
+        let mut expected = vec![first_version_id, second_version_id];
+        expected.sort();
+        assert_eq!(versions, expected);
+    }
+
+    #[tokio::test]
+    async fn register_workflow_keeps_versions_independent_per_workflow_id() {
+        let (control_plane, _queue, _router, store) = harness();
+        let (definition, _task_id) = single_task_definition();
+        let first_workflow_id = miranda_core::id::WorkflowId::new();
+        let second_workflow_id = miranda_core::id::WorkflowId::new();
+
+        control_plane
+            .register_workflow(first_workflow_id, "workflow_a", &definition)
+            .await
+            .unwrap();
+        control_plane
+            .register_workflow(second_workflow_id, "workflow_b", &definition)
+            .await
+            .unwrap();
+
+        assert_eq!(
+            store.get_versions(first_workflow_id).await.unwrap().len(),
+            1
+        );
+        assert_eq!(
+            store.get_versions(second_workflow_id).await.unwrap().len(),
+            1
+        );
     }
 
     #[tokio::test]
