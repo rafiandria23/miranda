@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n                INSERT IGNORE INTO workflows (id, name)\n                VALUES (?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "118e4e6e287a9b6e6a49ea8e7f3e6fa3c96b215759279bb8d5d865947268aa93"
+}

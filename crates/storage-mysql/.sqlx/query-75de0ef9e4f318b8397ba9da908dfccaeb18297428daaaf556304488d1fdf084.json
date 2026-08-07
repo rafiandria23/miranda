@@ -1,6 +1,6 @@
 {
   "db_name": "MySQL",
-  "query": "\n            SELECT definition FROM workflow_versions\n            WHERE id = ?\n            ",
+  "query": "\n                SELECT definition FROM workflow_versions\n                WHERE id = ?\n                ",
   "describe": {
     "columns": [
       {
@@ -27,5 +27,5 @@
       false
     ]
   },
-  "hash": "6895406d4e4bae959559a372a28ee8f082ef94dadfb8607828986cb213496f31"
+  "hash": "75de0ef9e4f318b8397ba9da908dfccaeb18297428daaaf556304488d1fdf084"
 }

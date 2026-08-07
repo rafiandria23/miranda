@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n                INSERT INTO workflow_versions (id, workflow_id, version, definition)\n                VALUES (?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "62cec7ad4a2312f6f81743388e3b3715d33b61d5bc74ef860013621c803cd5b8"
+}

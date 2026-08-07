@@ -1,20 +1,10 @@
 [workspace]
 resolver = "3"
-members = [
-  "crates/cli",
-  "crates/control-plane",
-  "crates/core",
-  "crates/engine",
-  "crates/server",
-  "crates/storage",
-  "crates/storage-mysql",
-  "crates/storage-postgres",
-  "crates/storage-sqlite",
-  "crates/worker",
-]
+members = ["crates/*"]
 
 [workspace.dependencies]
 async-trait = { version = "0.1.91" }
+clap = { version = "4.6.6", features = ["derive", "env"] }
 futures-util = { version = "0.3.33" }
 reqwest = { version = "0.13.4", features = ["query"] }
 serde = { version = "1.0.229", features = ["derive"] }

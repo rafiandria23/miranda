@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT OR IGNORE INTO workflows (id, name)\n                VALUES (?1, ?2)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "e9c59a85249044c9c8eb96a2ec998353d88812949c844f802e875f07fabbe789"
+}

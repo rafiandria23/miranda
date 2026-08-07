@@ -1,6 +1,6 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT state, version FROM workflow_executions\n            WHERE id = $1\n            ",
+  "query": "\n                SELECT state, version FROM workflow_executions\n                WHERE id = $1\n                ",
   "describe": {
     "columns": [
       {
@@ -36,5 +36,5 @@
       false
     ]
   },
-  "hash": "2c39011ff9679b4629872871208b03b8067b4917c730df3db2d2e0f5bdb998c1"
+  "hash": "431457d8f847750f509ae58e513654ff04aabdf50b2b068e502a551f9ede0bf7"
 }

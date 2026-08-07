@@ -1,16 +1,16 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n            SELECT id FROM workflow_versions\n            WHERE workflow_id = $1\n            ORDER BY version ASC\n            ",
+  "query": "\n                SELECT definition FROM workflow_versions\n                WHERE id = $1\n                ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "id",
-        "type_info": "Uuid",
+        "name": "definition",
+        "type_info": "Jsonb",
         "origin": {
           "Table": {
             "table": "workflow_versions",
-            "name": "id"
+            "name": "definition"
           }
         }
       }
@@ -24,5 +24,5 @@
       false
     ]
   },
-  "hash": "848f882d658e1df8202958946c2bbbfa65e5ebfd8ee4484f71d52e683a317f2e"
+  "hash": "5d9a4d254d69bc1cef63098b3adb3708f2ec51ac93e6e187c0c5a59f80db4be8"
 }

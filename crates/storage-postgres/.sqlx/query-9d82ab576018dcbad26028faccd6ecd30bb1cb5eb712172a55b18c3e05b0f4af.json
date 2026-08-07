@@ -1,0 +1,17 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                UPDATE workflow_executions\n                SET state = $1, status = $2, version = version + 1\n                WHERE id = $3 AND version = $4\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Jsonb",
+        "Text",
+        "Uuid",
+        "Int8"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "9d82ab576018dcbad26028faccd6ecd30bb1cb5eb712172a55b18c3e05b0f4af"
+}

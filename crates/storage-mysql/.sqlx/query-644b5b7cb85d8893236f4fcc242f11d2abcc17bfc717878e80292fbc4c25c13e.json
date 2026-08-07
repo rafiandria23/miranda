@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n                UPDATE workflow_executions\n                SET state = ?, status = ?, version = version + 1\n                WHERE id = ? AND version = ?\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "644b5b7cb85d8893236f4fcc242f11d2abcc17bfc717878e80292fbc4c25c13e"
+}

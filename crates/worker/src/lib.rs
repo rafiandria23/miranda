@@ -14,3 +14,4 @@ pub use heartbeat::{
     DEFAULT_HEARTBEAT_INTERVAL, DEFAULT_MAX_CONSECUTIVE_HEARTBEAT_FAILURES, HeartbeatRunner,
 };
 pub use lease::TaskLease;
+pub use worker::{Worker, WorkerConfig, WorkerHandle};

@@ -1,0 +1,78 @@
+syntax = "proto3";
+
+package miranda.worker.v1;
+
+service WorkerService {
+  rpc Register(RegisterRequest) returns (RegisterResponse);
+  rpc Deregister(DeregisterRequest) returns (DeregisterResponse);
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+  rpc PollTask(PollTaskRequest) returns (PollTaskResponse);
+  rpc ReportResult(ReportResultRequest) returns (ReportResultResponse);
+}
+
+message RegisterRequest {
+  string worker_id = 1;
+  repeated string capabilities = 2;
+}
+
+message RegisterResponse {
+
+}
+
+message DeregisterRequest {
+  string worker_id = 1;
+}
+
+message DeregisterResponse {}
+
+message HeartbeatRequest {
+string worker_id = 1;
+repeated string active_leases = 2;
+}
+
+message HeartbeatResponse {
+
+}
+
+message PollTaskRequest {
+  string worker_id = 1;
+  repeated string capabilities = 2;
+}
+
+message PollTaskResponse {
+  optional TaskAssignment assignment = 1;
+}
+
+message TaskAssignment {
+  string lease_token = 1;
+  WorkflowTask task = 2;
+  optional uint64 timeout_ms = 3;
+}
+
+message WorkflowTask {
+  string id = 1;
+  string task_type = 2;
+  string config_json = 3;
+  repeated string dependencies = 4;
+}
+
+message ReportResultRequest {
+  string worker_id = 1;
+  string lease_token = 2;
+  TaskResult result = 3;
+}
+
+message TaskResult {
+  oneof outcome {
+    Success success = 1;
+    Failure failure = 2;
+  }
+}
+
+message Success {}
+
+message Failure {
+  string message = 1;
+}
+
+message ReportResultResponse {}

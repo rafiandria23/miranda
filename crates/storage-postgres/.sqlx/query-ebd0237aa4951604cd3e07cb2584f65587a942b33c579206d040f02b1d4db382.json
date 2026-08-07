@@ -1,28 +1,28 @@
 {
   "db_name": "PostgreSQL",
-  "query": "\n                SELECT version FROM workflow_executions\n                WHERE id = $1\n                ",
+  "query": "\n                SELECT state FROM workflow_executions\n                WHERE status = ANY($1)\n                ",
   "describe": {
     "columns": [
       {
         "ordinal": 0,
-        "name": "version",
-        "type_info": "Int8",
+        "name": "state",
+        "type_info": "Jsonb",
         "origin": {
           "Table": {
             "table": "workflow_executions",
-            "name": "version"
+            "name": "state"
           }
         }
       }
     ],
     "parameters": {
       "Left": [
-        "Uuid"
+        "TextArray"
       ]
     },
     "nullable": [
       false
     ]
   },
-  "hash": "32850e9383a9fc3d8f9213d90da10b62ffb98bdfb8ff4e68a347568e939ce0b6"
+  "hash": "ebd0237aa4951604cd3e07cb2584f65587a942b33c579206d040f02b1d4db382"
 }

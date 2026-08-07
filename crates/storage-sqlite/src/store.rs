@@ -5,6 +5,7 @@ use miranda_core::{
 };
 use miranda_storage::{StorageError, WorkflowStore};
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
+use std::{future::Future, pin::Pin};
 
 use crate::SqliteConfig;
 
@@ -33,226 +34,246 @@ impl SqliteStore {
 }
 
 impl WorkflowStore for SqliteStore {
-    async fn save_definition(
-        &self,
+    fn save_definition<'a>(
+        &'a self,
         workflow_id: WorkflowId,
-        name: &str,
+        name: &'a str,
         version_id: WorkflowVersionId,
         version: u64,
-        definition: &WorkflowDefinition,
-    ) -> Result<(), StorageError> {
-        let definition_json = serde_json::to_string(definition)
-            .map_err(|e| StorageError::Serialization(e.to_string()))?;
+        definition: &'a WorkflowDefinition,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let definition_json = serde_json::to_string(definition)
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
 
-        let workflow_id_str = workflow_id.to_string();
-        let version_id_str = version_id.to_string();
-        let version = version as i64;
+            let workflow_id_str = workflow_id.to_string();
+            let version_id_str = version_id.to_string();
+            let version = version as i64;
 
-        let mut tx = self
-            .pool
-            .begin()
+            let mut tx = self
+                .pool
+                .begin()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            sqlx::query!(
+                r#"
+                INSERT OR IGNORE INTO workflows (id, name)
+                VALUES (?1, ?2)
+                "#,
+                workflow_id_str,
+                name,
+            )
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Backend(e.to_string()))?;
 
-        sqlx::query!(
-            r#"
-            INSERT OR IGNORE INTO workflows (id, name)
-            VALUES (?1, ?2)
-            "#,
-            workflow_id_str,
-            name,
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-        sqlx::query!(
-            r#"
-            INSERT INTO workflow_versions (id, workflow_id, version, definition)
-            VALUES (?1, ?2, ?3, ?4)
-            "#,
-            version_id_str,
-            workflow_id_str,
-            version,
-            definition_json,
-        )
-        .execute(&mut *tx)
-        .await
-        .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-        tx.commit()
+            sqlx::query!(
+                r#"
+                INSERT INTO workflow_versions (id, workflow_id, version, definition)
+                VALUES (?1, ?2, ?3, ?4)
+                "#,
+                version_id_str,
+                workflow_id_str,
+                version,
+                definition_json,
+            )
+            .execute(&mut *tx)
             .await
             .map_err(|e| StorageError::Backend(e.to_string()))?;
 
-        Ok(())
+            tx.commit()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
     }
 
-    async fn get_versions(
-        &self,
+    fn get_versions<'a>(
+        &'a self,
         workflow_id: WorkflowId,
-    ) -> Result<Vec<WorkflowVersionId>, StorageError> {
-        let workflow_id_str = workflow_id.to_string();
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<WorkflowVersionId>, StorageError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let workflow_id_str = workflow_id.to_string();
 
-        let rows = sqlx::query!(
-            r#"
-            SELECT id FROM workflow_versions
-            WHERE workflow_id = ?1
-            ORDER BY version ASC
-            "#,
-            workflow_id_str,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| StorageError::Backend(e.to_string()))?;
+            let rows = sqlx::query!(
+                r#"
+                SELECT id FROM workflow_versions
+                WHERE workflow_id = ?1
+                ORDER BY version ASC
+                "#,
+                workflow_id_str,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
 
-        rows.into_iter()
-            .map(|row| {
-                row.id
-                    .parse::<WorkflowVersionId>()
-                    .map_err(|e| StorageError::Serialization(e.to_string()))
-            })
-            .collect()
+            rows.into_iter()
+                .map(|row| {
+                    row.id
+                        .parse::<WorkflowVersionId>()
+                        .map_err(|e| StorageError::Serialization(e.to_string()))
+                })
+                .collect()
+        })
     }
 
-    async fn get_definition(
-        &self,
+    fn get_definition<'a>(
+        &'a self,
         version_id: WorkflowVersionId,
-    ) -> Result<WorkflowDefinition, StorageError> {
-        let version_id_str = version_id.to_string();
+    ) -> Pin<Box<dyn Future<Output = Result<WorkflowDefinition, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let version_id_str = version_id.to_string();
 
-        let row = sqlx::query!(
-            r#"
-            SELECT definition FROM workflow_versions
-            WHERE id = ?1
-            "#,
-            version_id_str,
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| StorageError::Backend(e.to_string()))?;
+            let row = sqlx::query!(
+                r#"
+                SELECT definition FROM workflow_versions
+                WHERE id = ?1
+                "#,
+                version_id_str,
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
 
-        let definition_json = row
-            .map(|r| r.definition)
-            .ok_or(StorageError::WorkflowVersionNotFound(version_id))?;
+            let definition_json = row
+                .map(|r| r.definition)
+                .ok_or(StorageError::WorkflowVersionNotFound(version_id))?;
 
-        serde_json::from_str(&definition_json)
-            .map_err(|e| StorageError::Serialization(e.to_string()))
+            serde_json::from_str(&definition_json)
+                .map_err(|e| StorageError::Serialization(e.to_string()))
+        })
     }
 
-    async fn save_execution(&self, execution: &Execution) -> Result<(), StorageError> {
-        let execution_json = serde_json::to_string(execution)
-            .map_err(|e| StorageError::Serialization(e.to_string()))?;
+    fn save_execution<'a>(
+        &'a self,
+        execution: &'a Execution,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let execution_json = serde_json::to_string(execution)
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
 
-        let id_str = execution.id().to_string();
-        let version_id_str = execution.workflow_version_id().to_string();
-        let status = execution.status().as_str();
+            let id_str = execution.id().to_string();
+            let version_id_str = execution.workflow_version_id().to_string();
+            let status = execution.status().as_str();
 
-        sqlx::query!(
-            r#"
-            INSERT INTO workflow_executions (id, workflow_version_id, status, state)
-            VALUES (?1, ?2, ?3, ?4)
-            "#,
-            id_str,
-            version_id_str,
-            status,
-            execution_json,
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|e| StorageError::Backend(e.to_string()))?;
+            sqlx::query!(
+                r#"
+                INSERT INTO workflow_executions (id, workflow_version_id, status, state)
+                VALUES (?1, ?2, ?3, ?4)
+                "#,
+                id_str,
+                version_id_str,
+                status,
+                execution_json,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn update_execution(
-        &self,
-        execution: &Execution,
+    fn update_execution<'a>(
+        &'a self,
+        execution: &'a Execution,
         expected_version: u64,
-    ) -> Result<(), StorageError> {
-        let execution_json = serde_json::to_string(execution)
-            .map_err(|e| StorageError::Serialization(e.to_string()))?;
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let execution_json = serde_json::to_string(execution)
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
 
-        let id_str = execution.id().to_string();
-        let status = execution.status().as_str();
-        let expected_version = expected_version as i64;
+            let id_str = execution.id().to_string();
+            let status = execution.status().as_str();
+            let expected_version = expected_version as i64;
 
-        let result = sqlx::query!(
-            r#"
-            UPDATE workflow_executions
-            SET state = ?1, status = ?2, version = version + 1
-            WHERE id = ?3 AND version = ?4
-            "#,
-            execution_json,
-            status,
-            id_str,
-            expected_version,
-        )
-        .execute(&self.pool)
-        .await
-        .map_err(|e| StorageError::Backend(e.to_string()))?;
+            let result = sqlx::query!(
+                r#"
+                UPDATE workflow_executions
+                SET state = ?1, status = ?2, version = version + 1
+                WHERE id = ?3 AND version = ?4
+                "#,
+                execution_json,
+                status,
+                id_str,
+                expected_version,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
 
-        if result.rows_affected() == 0 {
-            let current = sqlx::query!(
-                r#"SELECT version FROM workflow_executions WHERE id = ?1"#,
+            if result.rows_affected() == 0 {
+                let current = sqlx::query!(
+                    r#"SELECT version FROM workflow_executions WHERE id = ?1"#,
+                    id_str,
+                )
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+                return match current {
+                    Some(row) => Err(StorageError::OptimisticLockFailed {
+                        id: execution.id(),
+                        expected: expected_version as u64,
+                        actual: row.version as u64,
+                    }),
+                    None => Err(StorageError::ExecutionNotFound(execution.id())),
+                };
+            }
+
+            Ok(())
+        })
+    }
+
+    fn get_execution<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+    ) -> Pin<Box<dyn Future<Output = Result<(Execution, u64), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let id_str = execution_id.to_string();
+
+            let row = sqlx::query!(
+                r#"SELECT state, version FROM workflow_executions WHERE id = ?1"#,
                 id_str,
             )
             .fetch_optional(&self.pool)
             .await
             .map_err(|e| StorageError::Backend(e.to_string()))?;
 
-            return match current {
-                Some(row) => Err(StorageError::OptimisticLockFailed {
-                    id: execution.id(),
-                    expected: expected_version as u64,
-                    actual: row.version as u64,
-                }),
-                None => Err(StorageError::ExecutionNotFound(execution.id())),
-            };
-        }
+            let row = row.ok_or(StorageError::ExecutionNotFound(execution_id))?;
 
-        Ok(())
+            let execution: Execution = serde_json::from_str(&row.state)
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
+
+            Ok((execution, row.version as u64))
+        })
     }
 
-    async fn get_execution(
-        &self,
-        execution_id: ExecutionId,
-    ) -> Result<(Execution, u64), StorageError> {
-        let id_str = execution_id.to_string();
+    fn get_active_executions<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Execution>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let pending = ExecutionStatus::Pending.as_str();
+            let running = ExecutionStatus::Running.as_str();
 
-        let row = sqlx::query!(
-            r#"SELECT state, version FROM workflow_executions WHERE id = ?1"#,
-            id_str,
-        )
-        .fetch_optional(&self.pool)
-        .await
-        .map_err(|e| StorageError::Backend(e.to_string()))?;
+            let rows = sqlx::query!(
+                r#"SELECT state FROM workflow_executions WHERE status IN (?1, ?2)"#,
+                pending,
+                running,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
 
-        let row = row.ok_or(StorageError::ExecutionNotFound(execution_id))?;
-
-        let execution: Execution = serde_json::from_str(&row.state)
-            .map_err(|e| StorageError::Serialization(e.to_string()))?;
-
-        Ok((execution, row.version as u64))
-    }
-
-    async fn get_active_executions(&self) -> Result<Vec<Execution>, StorageError> {
-        let pending = ExecutionStatus::Pending.as_str();
-        let running = ExecutionStatus::Running.as_str();
-
-        let rows = sqlx::query!(
-            r#"SELECT state FROM workflow_executions WHERE status IN (?1, ?2)"#,
-            pending,
-            running,
-        )
-        .fetch_all(&self.pool)
-        .await
-        .map_err(|e| StorageError::Backend(e.to_string()))?;
-
-        rows.into_iter()
-            .map(|row| {
-                serde_json::from_str(&row.state)
-                    .map_err(|e| StorageError::Serialization(e.to_string()))
-            })
-            .collect()
+            rows.into_iter()
+                .map(|row| {
+                    serde_json::from_str(&row.state)
+                        .map_err(|e| StorageError::Serialization(e.to_string()))
+                })
+                .collect()
+        })
     }
 }

@@ -3,47 +3,103 @@ use miranda_core::{
     id::{ExecutionId, WorkflowId, WorkflowVersionId},
     workflow::WorkflowDefinition,
 };
-use std::future::Future;
+use std::{future::Future, pin::Pin, sync::Arc};
 
 use crate::StorageError;
 
 pub trait WorkflowStore: Send + Sync {
-    fn save_definition(
-        &self,
+    fn save_definition<'a>(
+        &'a self,
         workflow_id: WorkflowId,
-        name: &str,
+        name: &'a str,
         version_id: WorkflowVersionId,
         version: u64,
-        definition: &WorkflowDefinition,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+        definition: &'a WorkflowDefinition,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>>;
 
-    fn get_versions(
-        &self,
+    fn get_versions<'a>(
+        &'a self,
         workflow_id: WorkflowId,
-    ) -> impl Future<Output = Result<Vec<WorkflowVersionId>, StorageError>> + Send;
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<WorkflowVersionId>, StorageError>> + Send + 'a>>;
 
-    fn get_definition(
-        &self,
+    fn get_definition<'a>(
+        &'a self,
         version_id: WorkflowVersionId,
-    ) -> impl Future<Output = Result<WorkflowDefinition, StorageError>> + Send;
+    ) -> Pin<Box<dyn Future<Output = Result<WorkflowDefinition, StorageError>> + Send + 'a>>;
 
-    fn save_execution(
-        &self,
-        execution: &Execution,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+    fn save_execution<'a>(
+        &'a self,
+        execution: &'a Execution,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>>;
 
-    fn update_execution(
-        &self,
-        execution: &Execution,
+    fn update_execution<'a>(
+        &'a self,
+        execution: &'a Execution,
         expected_version: u64,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>>;
 
-    fn get_execution(
-        &self,
+    fn get_execution<'a>(
+        &'a self,
         execution_id: ExecutionId,
-    ) -> impl Future<Output = Result<(Execution, u64), StorageError>> + Send;
+    ) -> Pin<Box<dyn Future<Output = Result<(Execution, u64), StorageError>> + Send + 'a>>;
 
-    fn get_active_executions(
-        &self,
-    ) -> impl Future<Output = Result<Vec<Execution>, StorageError>> + Send;
+    fn get_active_executions<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Execution>, StorageError>> + Send + 'a>>;
+}
+
+impl WorkflowStore for Arc<dyn WorkflowStore> {
+    fn save_definition<'a>(
+        &'a self,
+        workflow_id: WorkflowId,
+        name: &'a str,
+        version_id: WorkflowVersionId,
+        version: u64,
+        definition: &'a WorkflowDefinition,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        (**self).save_definition(workflow_id, name, version_id, version, definition)
+    }
+
+    fn get_versions<'a>(
+        &'a self,
+        workflow_id: WorkflowId,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<WorkflowVersionId>, StorageError>> + Send + 'a>>
+    {
+        (**self).get_versions(workflow_id)
+    }
+
+    fn get_definition<'a>(
+        &'a self,
+        version_id: WorkflowVersionId,
+    ) -> Pin<Box<dyn Future<Output = Result<WorkflowDefinition, StorageError>> + Send + 'a>> {
+        (**self).get_definition(version_id)
+    }
+
+    fn save_execution<'a>(
+        &'a self,
+        execution: &'a Execution,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        (**self).save_execution(execution)
+    }
+
+    fn update_execution<'a>(
+        &'a self,
+        execution: &'a Execution,
+        expected_version: u64,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        (**self).update_execution(execution, expected_version)
+    }
+
+    fn get_execution<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+    ) -> Pin<Box<dyn Future<Output = Result<(Execution, u64), StorageError>> + Send + 'a>> {
+        (**self).get_execution(execution_id)
+    }
+
+    fn get_active_executions<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Execution>, StorageError>> + Send + 'a>> {
+        (**self).get_active_executions()
+    }
 }
