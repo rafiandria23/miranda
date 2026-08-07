@@ -6,7 +6,8 @@ use miranda_storage_mysql::{MySqlConfig, MySqlStore};
 use miranda_storage_postgres::{PostgresConfig, PostgresStore};
 use miranda_storage_sqlite::{SqliteConfig, SqliteStore};
 use miranda_worker::{Worker, WorkerConfig, executor::DispatchExecutor};
-use std::{error::Error, sync::Arc};
+use std::{error::Error, net::SocketAddr, sync::Arc};
+use tokio::net::TcpListener;
 use tracing::info;
 
 use crate::cli::{Cli, Role};
@@ -23,18 +24,23 @@ async fn run_control_plane(args: Cli) -> Result<(), Box<dyn Error>> {
     let database_url = args
         .database_url
         .ok_or("--database-url is required for --role control-plane")?;
-
-    let control_plane = build_control_plane(&database_url).await?;
-    let control_plane = Arc::new(control_plane);
+    let control_plane = Arc::new(build_control_plane(&database_url).await?);
 
     let grpc_addr = args.grpc_bind.parse()?;
+    let http_addr: SocketAddr = args.http_bind.parse()?;
 
-    info!(addr = %grpc_addr, "starting control-plane gRPC server");
+    info!(grpc = %grpc_addr, http = %http_addr, "starting control-plane servers");
 
-    let server = crate::grpc::service::serve(control_plane, grpc_addr);
+    let grpc_server = crate::grpc::service::serve(control_plane.clone(), grpc_addr);
+
+    let http_router = crate::api::router(control_plane.clone());
+    let http_listener = TcpListener::bind(http_addr).await?;
+    let http_server = axum::serve(http_listener, http_router);
 
     tokio::select! {
-        result = server => result?,
+        result = grpc_server => result?,
+
+        result = http_server => result.map_err(|e| Box::new(e) as Box<dyn Error>)?,
 
         _ = shutdown_signal() => {
             info!("shutdown signal received");
@@ -74,8 +80,7 @@ async fn run_both(args: Cli) -> Result<(), Box<dyn Error>> {
         .clone()
         .ok_or("--database-url is required for --role both")?;
 
-    let control_plane = build_control_plane(&database_url).await?;
-    let control_plane = Arc::new(control_plane);
+    let control_plane = Arc::new(build_control_plane(&database_url).await?);
 
     let client = Arc::new(crate::local_client::LocalControlPlaneClient::new(
         control_plane.clone(),
@@ -86,13 +91,24 @@ async fn run_both(args: Cli) -> Result<(), Box<dyn Error>> {
     let worker_handle = worker.run();
 
     let grpc_addr = args.grpc_bind.parse()?;
+    let http_addr: SocketAddr = args.http_bind.parse()?;
 
-    info!(addr = %grpc_addr, "starting control-plane gRPC server (also serving co-located worker in-process)");
+    info!(
+        grpc = %grpc_addr,
+        http = %http_addr,
+        "starting control-plane gRPC + HTTP servers (also serving co-located worker in-process)"
+    );
 
-    let server = crate::grpc::service::serve(control_plane, grpc_addr);
+    let grpc_server = crate::grpc::service::serve(control_plane.clone(), grpc_addr);
+
+    let http_router = crate::api::router(control_plane.clone());
+    let http_listener = TcpListener::bind(http_addr).await?;
+    let http_server = axum::serve(http_listener, http_router);
 
     tokio::select! {
-        result = server => result?,
+        result = grpc_server => result?,
+
+        result = http_server => result.map_err(|e| Box::new(e) as Box<dyn Error>)?,
 
         _ = shutdown_signal() => {
             info!("shutdown signal received, draining worker");

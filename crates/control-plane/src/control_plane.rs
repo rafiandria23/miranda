@@ -367,6 +367,26 @@ where
 
         Ok(stale.len())
     }
+
+    pub async fn get_execution(
+        &self,
+        execution_id: ExecutionId,
+    ) -> Result<(Execution, u64), ControlPlaneError> {
+        self.store
+            .get_execution(execution_id)
+            .await
+            .map_err(ControlPlaneError::from)
+    }
+
+    pub async fn get_definition(
+        &self,
+        version_id: WorkflowVersionId,
+    ) -> Result<WorkflowDefinition, ControlPlaneError> {
+        self.store
+            .get_definition(version_id)
+            .await
+            .map_err(ControlPlaneError::from)
+    }
 }
 
 #[cfg(test)]
