@@ -41,7 +41,7 @@ pub fn router(control_plane: Arc<ServerControlPlane>) -> Router {
     Router::new()
         .route("/workflows", post(register_workflow))
         .route("/executions", post(submit_execution))
-        .route("/executions/:id", get(get_execution_status))
+        .route("/executions/{id}", get(get_execution_status))
         .with_state(control_plane)
 }
 

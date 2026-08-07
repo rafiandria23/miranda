@@ -99,6 +99,21 @@ where
             }
 
             if noop_ready.is_empty() {
+                if dispatchable_ready.is_empty()
+                    && execution
+                        .tasks()
+                        .iter()
+                        .all(|t| t.status() == TaskStatus::Completed)
+                {
+                    execution.apply(
+                        Event::new(execution.id(), EventPayload::ExecutionCompleted),
+                        definition,
+                    )?;
+
+                    self.store.update_execution(&execution, version).await?;
+                    version += 1;
+                }
+
                 return Ok((execution, version));
             }
 

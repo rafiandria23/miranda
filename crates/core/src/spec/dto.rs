@@ -38,7 +38,7 @@ pub enum TaskConfigSpec {
         #[serde(default)]
         shell: Option<String>,
 
-        #[serde(default = "default_success_codes")]
+        #[serde(default = "default_shell_success_codes")]
         success_codes: Vec<StatusMatcher>,
     },
 
@@ -55,7 +55,7 @@ pub enum TaskConfigSpec {
         #[serde(default)]
         body: Option<String>,
 
-        #[serde(default = "default_success_codes")]
+        #[serde(default = "default_http_success_codes")]
         success_codes: Vec<StatusMatcher>,
     },
 
@@ -73,7 +73,11 @@ pub enum TaskConfigSpec {
     },
 }
 
-fn default_success_codes() -> Vec<StatusMatcher> {
+fn default_shell_success_codes() -> Vec<StatusMatcher> {
+    vec![StatusMatcher::Exact(0)]
+}
+
+fn default_http_success_codes() -> Vec<StatusMatcher> {
     vec![StatusMatcher::Range(200, 299)]
 }
 
