@@ -12,6 +12,7 @@ use miranda_core::{
     id::{ExecutionId, WorkflowId, WorkflowVersionId},
     workflow::WorkflowDefinition,
 };
+use miranda_storage::StorageError;
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -21,13 +22,38 @@ struct ApiError(StatusCode, String);
 
 impl From<ControlPlaneError> for ApiError {
     fn from(err: ControlPlaneError) -> Self {
-        ApiError(StatusCode::INTERNAL_SERVER_ERROR, err.to_string())
+        let status = match &err {
+            ControlPlaneError::Domain(_) => StatusCode::CONFLICT,
+
+            ControlPlaneError::Storage(StorageError::WorkflowNotFound(_))
+            | ControlPlaneError::Storage(StorageError::WorkflowVersionNotFound(_))
+            | ControlPlaneError::Storage(StorageError::ExecutionNotFound(_))
+            | ControlPlaneError::Storage(StorageError::SnapshotNotFound { .. }) => {
+                StatusCode::NOT_FOUND
+            }
+            ControlPlaneError::Storage(StorageError::OptimisticLockFailed { .. }) => {
+                StatusCode::CONFLICT
+            }
+            ControlPlaneError::Storage(_) => StatusCode::INTERNAL_SERVER_ERROR,
+
+            ControlPlaneError::Engine(_) => StatusCode::INTERNAL_SERVER_ERROR,
+
+            ControlPlaneError::WorkerNotFound(_) => StatusCode::NOT_FOUND,
+            ControlPlaneError::WorkerUnavailable(_) => StatusCode::SERVICE_UNAVAILABLE,
+
+            ControlPlaneError::Queue(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ControlPlaneError::Routing(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ControlPlaneError::Scheduler(_) => StatusCode::INTERNAL_SERVER_ERROR,
+            ControlPlaneError::InvalidRequest(_) => StatusCode::BAD_REQUEST,
+        };
+
+        ApiError(status, err.to_string())
     }
 }
 
 impl From<ExecutionError> for ApiError {
     fn from(err: ExecutionError) -> Self {
-        ApiError(StatusCode::BAD_REQUEST, err.to_string())
+        ApiError(StatusCode::CONFLICT, err.to_string())
     }
 }
 
