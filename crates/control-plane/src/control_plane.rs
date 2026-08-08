@@ -10,7 +10,7 @@ use miranda_engine::{
     task_runner::{TaskOutcome, TaskOutcomeResult},
 };
 use miranda_storage::{StorageError, WorkflowStore};
-use miranda_worker::assignment::TaskAssignment;
+use miranda_worker::{WorkerError, assignment::TaskAssignment};
 use std::{
     collections::HashMap,
     sync::Arc,
@@ -243,7 +243,7 @@ where
         &self,
         worker_id: WorkerId,
         lease_token: String,
-        result: Result<(), miranda_worker::WorkerError>,
+        result: Result<(), WorkerError>,
     ) -> Result<(), ControlPlaneError> {
         let token = LeaseToken(lease_token);
         let lease = self.leases.validate(&token, worker_id).await?;
@@ -268,53 +268,59 @@ where
                 )
                 .await;
 
-            match outcome_result {
-                Ok(TaskOutcomeResult::Completed) => {
-                    match self
-                        .resolve_and_enqueue_ready(execution, version, &definition)
-                        .await
-                    {
-                        Ok(_) => {
+            let write_result: Result<(), ControlPlaneError> = match &outcome_result {
+                Ok(TaskOutcomeResult::Completed) => self
+                    .resolve_and_enqueue_ready(execution.clone(), version, &definition)
+                    .await
+                    .map(|_| ()),
+
+                Ok(TaskOutcomeResult::Retried) | Err(EngineError::ExecutionFailed(_)) => self
+                    .store
+                    .update_execution(&execution, version)
+                    .await
+                    .map_err(Into::into),
+
+                Err(_other) => Ok(()),
+            };
+
+            match write_result {
+                Ok(()) => {
+                    match outcome_result {
+                        Ok(TaskOutcomeResult::Completed) => {
+                            self.leases.release(&token).await?;
+                        }
+
+                        Ok(TaskOutcomeResult::Retried) => {
                             self.leases.release(&token).await?;
 
-                            return Ok(());
+                            self.queue
+                                .enqueue(QueueItem {
+                                    execution_id: lease.execution_id,
+                                    workflow_task_id: lease.workflow_task_id,
+                                    definition,
+                                })
+                                .await?;
                         }
 
-                        Err(ControlPlaneError::Storage(StorageError::OptimisticLockFailed {
-                            ..
-                        })) if attempt < MAX_RETRIES => {
-                            continue;
+                        Err(EngineError::ExecutionFailed(_)) => {
+                            self.leases.release(&token).await?;
                         }
 
-                        Err(e) => return Err(e),
+                        Err(other) => {
+                            return Err(ControlPlaneError::from(other));
+                        }
                     }
-                }
-
-                Ok(TaskOutcomeResult::Retried) => {
-                    self.store.update_execution(&execution, version).await?;
-                    self.leases.release(&token).await?;
-
-                    self.queue
-                        .enqueue(QueueItem {
-                            execution_id: lease.execution_id,
-                            workflow_task_id: lease.workflow_task_id,
-                            definition,
-                        })
-                        .await?;
 
                     return Ok(());
                 }
 
-                Err(EngineError::ExecutionFailed(_)) => {
-                    self.store.update_execution(&execution, version).await?;
-                    self.leases.release(&token).await?;
-
-                    return Ok(());
+                Err(ControlPlaneError::Storage(StorageError::OptimisticLockFailed { .. }))
+                    if attempt < MAX_RETRIES =>
+                {
+                    continue;
                 }
 
-                Err(other) => {
-                    return Err(ControlPlaneError::from(other));
-                }
+                Err(e) => return Err(e),
             }
         }
 
@@ -847,7 +853,7 @@ mod tests {
             .report_result(
                 worker_id,
                 assignment.lease_token,
-                Err(miranda_worker::WorkerError::ExecutionFailed {
+                Err(WorkerError::ExecutionFailed {
                     message: "boom".to_string(),
                 }),
             )
@@ -883,7 +889,7 @@ mod tests {
             .report_result(
                 worker_id,
                 first_assignment.lease_token,
-                Err(miranda_worker::WorkerError::ExecutionFailed {
+                Err(WorkerError::ExecutionFailed {
                     message: "boom".to_string(),
                 }),
             )
@@ -932,7 +938,7 @@ mod tests {
             .report_result(
                 worker_id,
                 assignment.lease_token,
-                Err(miranda_worker::WorkerError::ExecutionFailed {
+                Err(WorkerError::ExecutionFailed {
                     message: "boom".to_string(),
                 }),
             )
