@@ -1,23 +1,72 @@
 use miranda_control_plane::{
-    ControlPlane, dispatcher::Dispatcher, queue::InMemoryTaskQueue, router::InMemoryRouter,
+    ControlPlane, DispatchStrategy,
+    dispatcher::Dispatcher,
+    queue::{InMemoryTaskQueue, TaskQueue},
+    router::{InMemoryRouter, Router},
 };
 use miranda_storage::WorkflowStore;
 use miranda_storage_mysql::{MySqlConfig, MySqlStore};
 use miranda_storage_postgres::{PostgresConfig, PostgresStore};
 use miranda_storage_sqlite::{SqliteConfig, SqliteStore};
 use miranda_worker::{Worker, WorkerConfig, executor::DispatchExecutor};
-use std::{error::Error, net::SocketAddr, sync::Arc};
+use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
-use tracing::info;
+use tracing::{info, warn};
 
 use crate::cli::Cli;
 
-pub async fn run(args: Cli) -> Result<(), Box<dyn Error>> {
-    match (args.control_plane, args.worker) {
-        (true, true) => run_colocated(args).await,
-        (true, false) => run_control_plane_only(args).await,
-        (false, true) => run_worker_only(args).await,
-        (false, false) => Err("must specify at least one of --control-plane or --worker".into()),
+async fn shutdown_signal() {
+    let _ = tokio::signal::ctrl_c().await;
+}
+
+pub type ServerControlPlane = ControlPlane<
+    InMemoryTaskQueue,
+    InMemoryRouter,
+    Arc<dyn WorkflowStore>,
+    Dispatcher<InMemoryTaskQueue>,
+>;
+
+async fn build_control_plane(database_url: &str) -> Result<ServerControlPlane, Box<dyn Error>> {
+    let store: Arc<dyn WorkflowStore> = if database_url.starts_with("mysql://") {
+        Arc::new(MySqlStore::connect(MySqlConfig::new(database_url)).await?)
+    } else if database_url.starts_with("postgres://") || database_url.starts_with("postgresql://") {
+        Arc::new(PostgresStore::connect(PostgresConfig::new(database_url)).await?)
+    } else if let Some(path) = database_url.strip_prefix("sqlite://") {
+        Arc::new(SqliteStore::connect(SqliteConfig::new(path)).await?)
+    } else {
+        return Err(format!("unsupported database URL scheme: {database_url}").into());
+    };
+
+    let queue = InMemoryTaskQueue::new();
+    let router = InMemoryRouter::new();
+    let dispatch = Dispatcher::new(queue.clone());
+
+    Ok(ControlPlane::new(queue, router, store, dispatch))
+}
+
+async fn run_reaper<Q, R, S, D>(control_plane: Arc<ControlPlane<Q, R, S, D>>, period: Duration)
+where
+    Q: TaskQueue,
+    R: Router,
+    S: WorkflowStore,
+    D: DispatchStrategy,
+{
+    let mut ticker = tokio::time::interval(period);
+
+    loop {
+        ticker.tick().await;
+
+        match control_plane.reap_expired_leases().await {
+            Ok(0) => {}
+            Ok(n) => info!(recovered = n, "reaped expired leases"),
+            Err(e) => warn!(error = %e, "reap_expired_leases failed"),
+        }
+
+        match control_plane.reap_stale_workers().await {
+            Ok(0) => {}
+            Ok(n) => info!(removed = n, "reaped stale workers"),
+            Err(e) => warn!(error = %e, "reap_stale_workers failed"),
+        }
     }
 }
 
@@ -31,6 +80,8 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
     let http_addr: SocketAddr = args.http_bind.parse()?;
 
     info!(grpc = %grpc_addr, http = %http_addr, "starting control-plane servers");
+
+    tokio::spawn(run_reaper(control_plane.clone(), Duration::from_secs(30)));
 
     let grpc_server = crate::grpc::service::serve(control_plane.clone(), grpc_addr);
 
@@ -100,6 +151,8 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
         "starting control-plane gRPC + HTTP servers (also serving co-located worker in-process)"
     );
 
+    tokio::spawn(run_reaper(control_plane.clone(), Duration::from_secs(30)));
+
     let grpc_server = crate::grpc::service::serve(control_plane.clone(), grpc_addr);
 
     let http_router = crate::api::router(control_plane.clone());
@@ -121,31 +174,11 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn shutdown_signal() {
-    let _ = tokio::signal::ctrl_c().await;
-}
-
-pub type ServerControlPlane = ControlPlane<
-    InMemoryTaskQueue,
-    InMemoryRouter,
-    Arc<dyn WorkflowStore>,
-    Dispatcher<InMemoryTaskQueue>,
->;
-
-async fn build_control_plane(database_url: &str) -> Result<ServerControlPlane, Box<dyn Error>> {
-    let store: Arc<dyn WorkflowStore> = if database_url.starts_with("mysql://") {
-        Arc::new(MySqlStore::connect(MySqlConfig::new(database_url)).await?)
-    } else if database_url.starts_with("postgres://") || database_url.starts_with("postgresql://") {
-        Arc::new(PostgresStore::connect(PostgresConfig::new(database_url)).await?)
-    } else if let Some(path) = database_url.strip_prefix("sqlite://") {
-        Arc::new(SqliteStore::connect(SqliteConfig::new(path)).await?)
-    } else {
-        return Err(format!("unsupported database URL scheme: {database_url}").into());
-    };
-
-    let queue = InMemoryTaskQueue::new();
-    let router = InMemoryRouter::new();
-    let dispatch = Dispatcher::new(queue.clone());
-
-    Ok(ControlPlane::new(queue, router, store, dispatch))
+pub async fn run(args: Cli) -> Result<(), Box<dyn Error>> {
+    match (args.control_plane, args.worker) {
+        (true, true) => run_colocated(args).await,
+        (true, false) => run_control_plane_only(args).await,
+        (false, true) => run_worker_only(args).await,
+        (false, false) => Err("must specify at least one of --control-plane or --worker".into()),
+    }
 }
