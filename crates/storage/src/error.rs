@@ -25,6 +25,9 @@ pub enum StorageError {
         actual: u64,
     },
 
+    #[error("conflict: {0}")]
+    Conflict(String),
+
     #[error("backend error: {0}")]
     Backend(String),
 

@@ -148,16 +148,29 @@ where
         name: &str,
         definition: &WorkflowDefinition,
     ) -> Result<WorkflowVersionId, ControlPlaneError> {
-        let existing_versions = self.store.get_versions(workflow_id).await?;
-        let next_version = existing_versions.len() as u64 + 1;
+        const MAX_RETRIES: u32 = 6;
 
-        let version_id = WorkflowVersionId::new();
+        for attempt in 0..MAX_RETRIES {
+            let existing_versions = self.store.get_versions(workflow_id).await?;
+            let next_version = existing_versions.len() as u64 + 1;
+            let version_id = WorkflowVersionId::new();
 
-        self.store
-            .save_definition(workflow_id, name, version_id, next_version, definition)
-            .await?;
+            match self
+                .store
+                .save_definition(workflow_id, name, version_id, next_version, definition)
+                .await
+            {
+                Ok(()) => return Ok(version_id),
+                Err(StorageError::Conflict(_)) if attempt < MAX_RETRIES => {
+                    continue;
+                }
+                Err(e) => return Err(e.into()),
+            }
+        }
 
-        Ok(version_id)
+        Err(ControlPlaneError::InvalidRequest(format!(
+            "failed to register workflow {workflow_id} after {MAX_RETRIES} attempts (concurrent registration contention)"
+        )))
     }
 
     pub async fn submit_execution(
@@ -491,6 +504,122 @@ mod tests {
         (control_plane, queue, router, store)
     }
 
+    /// Wraps a `MemoryStore` and forces the first `conflicts_remaining`
+    /// calls to `save_definition` to fail with `StorageError::Conflict`,
+    /// simulating a unique-constraint violation from a real backend under
+    /// concurrent `register_workflow` calls.
+    #[derive(Clone)]
+    struct ConflictingStore {
+        inner: MemoryStore,
+        conflicts_remaining: Arc<std::sync::atomic::AtomicU32>,
+    }
+
+    impl ConflictingStore {
+        fn new(inner: MemoryStore, conflicts: u32) -> Self {
+            Self {
+                inner,
+                conflicts_remaining: Arc::new(std::sync::atomic::AtomicU32::new(conflicts)),
+            }
+        }
+    }
+
+    impl WorkflowStore for ConflictingStore {
+        fn save_definition<'a>(
+            &'a self,
+            workflow_id: miranda_core::id::WorkflowId,
+            name: &'a str,
+            version_id: WorkflowVersionId,
+            version: u64,
+            definition: &'a WorkflowDefinition,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<(), StorageError>> + Send + 'a>,
+        > {
+            Box::pin(async move {
+                if self
+                    .conflicts_remaining
+                    .fetch_update(
+                        std::sync::atomic::Ordering::SeqCst,
+                        std::sync::atomic::Ordering::SeqCst,
+                        |n| if n > 0 { Some(n - 1) } else { None },
+                    )
+                    .is_ok()
+                {
+                    return Err(StorageError::Conflict("simulated conflict".to_string()));
+                }
+
+                self.inner
+                    .save_definition(workflow_id, name, version_id, version, definition)
+                    .await
+            })
+        }
+
+        fn get_versions<'a>(
+            &'a self,
+            workflow_id: miranda_core::id::WorkflowId,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<Vec<WorkflowVersionId>, StorageError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            self.inner.get_versions(workflow_id)
+        }
+
+        fn get_definition<'a>(
+            &'a self,
+            version_id: WorkflowVersionId,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<WorkflowDefinition, StorageError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            self.inner.get_definition(version_id)
+        }
+
+        fn save_execution<'a>(
+            &'a self,
+            execution: &'a Execution,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<(), StorageError>> + Send + 'a>,
+        > {
+            self.inner.save_execution(execution)
+        }
+
+        fn update_execution<'a>(
+            &'a self,
+            execution: &'a Execution,
+            expected_version: u64,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<(), StorageError>> + Send + 'a>,
+        > {
+            self.inner.update_execution(execution, expected_version)
+        }
+
+        fn get_execution<'a>(
+            &'a self,
+            execution_id: ExecutionId,
+        ) -> std::pin::Pin<
+            Box<
+                dyn std::future::Future<Output = Result<(Execution, u64), StorageError>>
+                    + Send
+                    + 'a,
+            >,
+        > {
+            self.inner.get_execution(execution_id)
+        }
+
+        fn get_active_executions<'a>(
+            &'a self,
+        ) -> std::pin::Pin<
+            Box<dyn std::future::Future<Output = Result<Vec<Execution>, StorageError>> + Send + 'a>,
+        > {
+            self.inner.get_active_executions()
+        }
+    }
+
     fn single_task_definition() -> (WorkflowDefinition, miranda_core::id::WorkflowTaskId) {
         let task_id = miranda_core::id::WorkflowTaskId::new();
         let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
@@ -602,6 +731,57 @@ mod tests {
         assert_eq!(
             store.get_versions(second_workflow_id).await.unwrap().len(),
             1
+        );
+    }
+
+    #[tokio::test]
+    async fn register_workflow_retries_on_conflict_and_eventually_succeeds() {
+        let queue = InMemoryTaskQueue::new();
+        let router = InMemoryRouter::new();
+        let inner_store = MemoryStore::new();
+        let store = ConflictingStore::new(inner_store.clone(), 3);
+        let dispatch = Dispatcher::new(queue.clone());
+
+        let control_plane = ControlPlane::new(queue, router, store, dispatch);
+        let (definition, _task_id) = single_task_definition();
+        let workflow_id = miranda_core::id::WorkflowId::new();
+
+        let version_id = control_plane
+            .register_workflow(workflow_id, "test_workflow", &definition)
+            .await
+            .unwrap();
+
+        let versions = inner_store.get_versions(workflow_id).await.unwrap();
+        assert_eq!(versions, vec![version_id]);
+    }
+
+    #[tokio::test]
+    async fn register_workflow_fails_once_conflict_retries_are_exhausted() {
+        let queue = InMemoryTaskQueue::new();
+        let router = InMemoryRouter::new();
+        let inner_store = MemoryStore::new();
+        // More conflicts than register_workflow's internal retry budget, so
+        // every attempt fails and the call must give up rather than loop
+        // forever.
+        let store = ConflictingStore::new(inner_store.clone(), 100);
+        let dispatch = Dispatcher::new(queue.clone());
+
+        let control_plane = ControlPlane::new(queue, router, store, dispatch);
+        let (definition, _task_id) = single_task_definition();
+        let workflow_id = miranda_core::id::WorkflowId::new();
+
+        let err = control_plane
+            .register_workflow(workflow_id, "test_workflow", &definition)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, ControlPlaneError::InvalidRequest(_)));
+        assert!(
+            inner_store
+                .get_versions(workflow_id)
+                .await
+                .unwrap()
+                .is_empty()
         );
     }
 

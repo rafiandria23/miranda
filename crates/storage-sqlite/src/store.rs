@@ -33,6 +33,16 @@ impl SqliteStore {
     }
 }
 
+fn map_insert_error(err: sqlx::Error) -> StorageError {
+    if let sqlx::Error::Database(db_err) = &err {
+        if db_err.is_unique_violation() {
+            return StorageError::Conflict(db_err.to_string());
+        }
+    }
+
+    StorageError::Backend(err.to_string())
+}
+
 impl WorkflowStore for SqliteStore {
     fn save_definition<'a>(
         &'a self,
@@ -80,7 +90,7 @@ impl WorkflowStore for SqliteStore {
             )
             .execute(&mut *tx)
             .await
-            .map_err(|e| StorageError::Backend(e.to_string()))?;
+            .map_err(map_insert_error)?;
 
             tx.commit()
                 .await
@@ -275,5 +285,97 @@ impl WorkflowStore for SqliteStore {
                 })
                 .collect()
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use miranda_core::workflow::{WorkflowDefinition, WorkflowTask};
+
+    use super::*;
+
+    async fn test_store() -> SqliteStore {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+
+        sqlx::migrate!("./migrations").run(&pool).await.unwrap();
+
+        SqliteStore::from_pool(pool)
+    }
+
+    fn definition() -> WorkflowDefinition {
+        let task_id = miranda_core::id::WorkflowTaskId::new();
+        let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
+
+        WorkflowDefinition::new(vec![task]).unwrap()
+    }
+
+    #[tokio::test]
+    async fn save_definition_maps_duplicate_version_to_conflict() {
+        let store = test_store().await;
+        let workflow_id = WorkflowId::new();
+        let definition = definition();
+
+        store
+            .save_definition(
+                workflow_id,
+                "test_workflow",
+                WorkflowVersionId::new(),
+                1,
+                &definition,
+            )
+            .await
+            .unwrap();
+
+        let err = store
+            .save_definition(
+                workflow_id,
+                "test_workflow",
+                WorkflowVersionId::new(),
+                1,
+                &definition,
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, StorageError::Conflict(_)),
+            "expected a Conflict error for a duplicate (workflow_id, version) pair, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn save_definition_succeeds_for_distinct_versions_of_same_workflow() {
+        let store = test_store().await;
+        let workflow_id = WorkflowId::new();
+        let definition = definition();
+
+        store
+            .save_definition(
+                workflow_id,
+                "test_workflow",
+                WorkflowVersionId::new(),
+                1,
+                &definition,
+            )
+            .await
+            .unwrap();
+
+        store
+            .save_definition(
+                workflow_id,
+                "test_workflow",
+                WorkflowVersionId::new(),
+                2,
+                &definition,
+            )
+            .await
+            .unwrap();
+
+        let versions = store.get_versions(workflow_id).await.unwrap();
+        assert_eq!(versions.len(), 2);
     }
 }

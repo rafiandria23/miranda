@@ -75,6 +75,16 @@ async fn ensure_database_exists(config: &MySqlConfig) -> Result<(), sqlx::Error>
     Ok(())
 }
 
+fn map_insert_error(err: sqlx::Error) -> StorageError {
+    if let sqlx::Error::Database(db_err) = &err {
+        if db_err.is_unique_violation() {
+            return StorageError::Conflict(db_err.to_string());
+        }
+    }
+
+    StorageError::Backend(err.to_string())
+}
+
 impl WorkflowStore for MySqlStore {
     fn save_definition<'a>(
         &'a self,
@@ -122,7 +132,7 @@ impl WorkflowStore for MySqlStore {
             )
             .execute(&mut *tx)
             .await
-            .map_err(|e| StorageError::Backend(e.to_string()))?;
+            .map_err(map_insert_error)?;
 
             tx.commit()
                 .await
@@ -317,5 +327,80 @@ impl WorkflowStore for MySqlStore {
                 })
                 .collect()
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::error::{DatabaseError, ErrorKind};
+    use std::{error::Error as StdError, fmt};
+
+    use super::*;
+
+    #[derive(Debug)]
+    struct FakeDbError {
+        kind: ErrorKind,
+    }
+
+    impl fmt::Display for FakeDbError {
+        fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+            write!(f, "fake db error")
+        }
+    }
+
+    impl StdError for FakeDbError {}
+
+    impl DatabaseError for FakeDbError {
+        fn message(&self) -> &str {
+            "fake db error"
+        }
+
+        fn as_error(&self) -> &(dyn StdError + Send + Sync + 'static) {
+            self
+        }
+
+        fn as_error_mut(&mut self) -> &mut (dyn StdError + Send + Sync + 'static) {
+            self
+        }
+
+        fn into_error(self: Box<Self>) -> Box<dyn StdError + Send + Sync + 'static> {
+            self
+        }
+
+        fn kind(&self) -> ErrorKind {
+            match self.kind {
+                ErrorKind::UniqueViolation => ErrorKind::UniqueViolation,
+                ErrorKind::ForeignKeyViolation => ErrorKind::ForeignKeyViolation,
+                _ => ErrorKind::Other,
+            }
+        }
+    }
+
+    unsafe impl Send for FakeDbError {}
+    unsafe impl Sync for FakeDbError {}
+
+    #[test]
+    fn map_insert_error_treats_unique_violation_as_conflict() {
+        let err = sqlx::Error::Database(Box::new(FakeDbError {
+            kind: ErrorKind::UniqueViolation,
+        }));
+
+        assert!(matches!(map_insert_error(err), StorageError::Conflict(_)));
+    }
+
+    #[test]
+    fn map_insert_error_treats_other_db_errors_as_backend() {
+        let err = sqlx::Error::Database(Box::new(FakeDbError {
+            kind: ErrorKind::ForeignKeyViolation,
+        }));
+
+        assert!(matches!(map_insert_error(err), StorageError::Backend(_)));
+    }
+
+    #[test]
+    fn map_insert_error_treats_non_database_errors_as_backend() {
+        let err = sqlx::Error::PoolClosed;
+
+        assert!(matches!(map_insert_error(err), StorageError::Backend(_)));
     }
 }
