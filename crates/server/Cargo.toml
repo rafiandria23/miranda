@@ -14,6 +14,7 @@ miranda-storage-postgres = { path = "../storage-postgres" }
 miranda-storage-sqlite = { path = "../storage-sqlite" }
 
 clap = { workspace = true }
+dirs = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 tokio = { workspace = true }

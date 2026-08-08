@@ -1,10 +1,13 @@
-use clap::{Parser, ValueEnum};
+use clap::Parser;
 
 #[derive(Debug, Parser)]
 #[command(name = "miranda-server", about = "Miranda workflow engine server")]
 pub struct Cli {
-    #[arg(long, value_enum)]
-    pub role: Role,
+    #[arg(long)]
+    pub control_plane: bool,
+
+    #[arg(long)]
+    pub worker: bool,
 
     #[arg(long, env = "DATABASE_URL")]
     pub database_url: Option<String>,
@@ -20,11 +23,4 @@ pub struct Cli {
 
     #[arg(long, value_delimiter = ',')]
     pub capabilities: Vec<String>,
-}
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum Role {
-    ControlPlane,
-    Worker,
-    Both,
 }

@@ -9,7 +9,7 @@ use miranda_engine::{
     retry::RetryPolicy,
     task_runner::{TaskOutcome, TaskOutcomeResult},
 };
-use miranda_storage::WorkflowStore;
+use miranda_storage::{StorageError, WorkflowStore};
 use miranda_worker::assignment::TaskAssignment;
 use std::{
     collections::HashMap,
@@ -77,6 +77,9 @@ where
         mut version: u64,
         definition: &Arc<WorkflowDefinition>,
     ) -> Result<(Execution, u64), ControlPlaneError> {
+        self.store.update_execution(&execution, version).await?;
+        version += 1;
+
         loop {
             let ready = execution.ready_tasks(definition);
 
@@ -171,11 +174,8 @@ where
 
         let definition = Arc::new(definition);
 
-        let (execution, version) = self
-            .resolve_and_enqueue_ready(execution, 1, &definition)
+        self.resolve_and_enqueue_ready(execution, 1, &definition)
             .await?;
-
-        self.store.update_execution(&execution, version).await?;
 
         Ok(())
     }
@@ -184,59 +184,59 @@ where
         &self,
         worker_id: WorkerId,
     ) -> Result<Option<TaskAssignment>, ControlPlaneError> {
-        let Some(item) = self.dispatch.next(worker_id).await? else {
-            return Ok(None);
-        };
+        loop {
+            let Some(item) = self.dispatch.next(worker_id).await? else {
+                return Ok(None);
+            };
 
-        let (mut execution, version) = self.store.get_execution(item.execution_id).await?;
+            let (mut execution, version) = self.store.get_execution(item.execution_id).await?;
 
-        let task_status = execution
-            .task(item.workflow_task_id)
-            .ok_or_else(|| {
-                ControlPlaneError::InvalidRequest("task not found in execution".to_string())
-            })?
-            .status();
+            let task_status = execution
+                .task(item.workflow_task_id)
+                .ok_or_else(|| {
+                    ControlPlaneError::InvalidRequest("task not found in execution".to_string())
+                })?
+                .status();
 
-        let payload = match task_status {
-            TaskStatus::Pending => EventPayload::TaskStarted {
-                workflow_task_id: item.workflow_task_id,
-            },
-            TaskStatus::Failed => EventPayload::TaskRetried {
-                workflow_task_id: item.workflow_task_id,
-            },
-            other => {
-                return Err(ControlPlaneError::InvalidRequest(format!(
-                    "task in unexpected status for dispatch: {other:?}"
-                )));
-            }
-        };
+            let payload = match task_status {
+                TaskStatus::Pending => EventPayload::TaskStarted {
+                    workflow_task_id: item.workflow_task_id,
+                },
+                TaskStatus::Failed => EventPayload::TaskRetried {
+                    workflow_task_id: item.workflow_task_id,
+                },
+                _stale => {
+                    continue;
+                }
+            };
 
-        execution.apply(Event::new(execution.id(), payload), &item.definition)?;
-        self.store.update_execution(&execution, version).await?;
+            execution.apply(Event::new(execution.id(), payload), &item.definition)?;
+            self.store.update_execution(&execution, version).await?;
 
-        let lease_token = self
-            .leases
-            .create(
-                item.execution_id,
-                item.workflow_task_id,
-                worker_id,
-                self.lease_ttl,
-            )
-            .await;
+            let lease_token = self
+                .leases
+                .create(
+                    item.execution_id,
+                    item.workflow_task_id,
+                    worker_id,
+                    self.lease_ttl,
+                )
+                .await;
 
-        let workflow_task = item
-            .definition
-            .task(item.workflow_task_id)
-            .expect("dequeued task must exist in its own definition")
-            .clone();
+            let workflow_task = item
+                .definition
+                .task(item.workflow_task_id)
+                .expect("dequeued task must exist in its own definition")
+                .clone();
 
-        let timeout = item.definition.effective_timeout(&workflow_task);
+            let timeout = item.definition.effective_timeout(&workflow_task);
 
-        Ok(Some(TaskAssignment {
-            lease_token: lease_token.0,
-            task: workflow_task,
-            timeout,
-        }))
+            return Ok(Some(TaskAssignment {
+                lease_token: lease_token.0,
+                task: workflow_task,
+                timeout,
+            }));
+        }
     }
 
     pub async fn report_result(
@@ -248,52 +248,80 @@ where
         let token = LeaseToken(lease_token);
         let lease = self.leases.validate(&token, worker_id).await?;
 
-        let (mut execution, version) = self.store.get_execution(lease.execution_id).await?;
-        let definition = Arc::new(
-            self.store
-                .get_definition(execution.workflow_version_id())
-                .await?,
-        );
+        const MAX_RETRIES: u32 = 6;
 
-        let outcome = TaskOutcome::new(&self.retry_policy);
+        for attempt in 0..MAX_RETRIES {
+            let (mut execution, version) = self.store.get_execution(lease.execution_id).await?;
+            let definition = Arc::new(
+                self.store
+                    .get_definition(execution.workflow_version_id())
+                    .await?,
+            );
 
-        match outcome
-            .apply(&mut execution, &definition, lease.workflow_task_id, result)
-            .await
-        {
-            Ok(TaskOutcomeResult::Completed) => {
-                let (execution, version) = self
-                    .resolve_and_enqueue_ready(execution, version, &definition)
-                    .await?;
+            let outcome = TaskOutcome::new(&self.retry_policy);
+            let outcome_result = outcome
+                .apply(
+                    &mut execution,
+                    &definition,
+                    lease.workflow_task_id,
+                    result.clone(),
+                )
+                .await;
 
-                self.store.update_execution(&execution, version).await?;
-                self.leases.release(&token).await?;
-            }
+            match outcome_result {
+                Ok(TaskOutcomeResult::Completed) => {
+                    match self
+                        .resolve_and_enqueue_ready(execution, version, &definition)
+                        .await
+                    {
+                        Ok(_) => {
+                            self.leases.release(&token).await?;
 
-            Ok(TaskOutcomeResult::Retried) => {
-                self.store.update_execution(&execution, version).await?;
-                self.leases.release(&token).await?;
+                            return Ok(());
+                        }
 
-                self.queue
-                    .enqueue(QueueItem {
-                        execution_id: lease.execution_id,
-                        workflow_task_id: lease.workflow_task_id,
-                        definition,
-                    })
-                    .await?;
-            }
+                        Err(ControlPlaneError::Storage(StorageError::OptimisticLockFailed {
+                            ..
+                        })) if attempt < MAX_RETRIES => {
+                            continue;
+                        }
 
-            Err(EngineError::ExecutionFailed(_)) => {
-                self.store.update_execution(&execution, version).await?;
-                self.leases.release(&token).await?;
-            }
+                        Err(e) => return Err(e),
+                    }
+                }
 
-            Err(other) => {
-                return Err(ControlPlaneError::from(other));
+                Ok(TaskOutcomeResult::Retried) => {
+                    self.store.update_execution(&execution, version).await?;
+                    self.leases.release(&token).await?;
+
+                    self.queue
+                        .enqueue(QueueItem {
+                            execution_id: lease.execution_id,
+                            workflow_task_id: lease.workflow_task_id,
+                            definition,
+                        })
+                        .await?;
+
+                    return Ok(());
+                }
+
+                Err(EngineError::ExecutionFailed(_)) => {
+                    self.store.update_execution(&execution, version).await?;
+                    self.leases.release(&token).await?;
+
+                    return Ok(());
+                }
+
+                Err(other) => {
+                    return Err(ControlPlaneError::from(other));
+                }
             }
         }
 
-        Ok(())
+        Err(ControlPlaneError::InvalidRequest(format!(
+            "report_result for task {:?} failed after {MAX_RETRIES} retries (concurrent write contention)",
+            lease.workflow_task_id
+        )))
     }
 
     pub async fn heartbeat(
@@ -690,7 +718,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn poll_task_errors_on_task_in_unexpected_status() {
+    async fn poll_task_skips_stale_entries_for_task_in_unexpected_status() {
         let (control_plane, queue, _router, _store) = harness();
         let (definition, task_id) = single_task_definition();
         let workflow_version_id = WorkflowVersionId::new();
@@ -706,7 +734,8 @@ mod tests {
         // First poll moves the task to Running.
         control_plane.poll_task(WorkerId::new()).await.unwrap();
 
-        // Re-inject the same task while it is already Running.
+        // Re-inject the same task while it is already Running, simulating a
+        // stale duplicate dispatch entry.
         queue
             .enqueue(QueueItem {
                 execution_id,
@@ -716,11 +745,11 @@ mod tests {
             .await
             .unwrap();
 
-        let err = match control_plane.poll_task(WorkerId::new()).await {
-            Err(err) => err,
-            Ok(_) => panic!("expected poll_task to fail"),
-        };
-        assert!(matches!(err, ControlPlaneError::InvalidRequest(_)));
+        // The stale entry is skipped rather than erroring, and since it was
+        // the only item left in the queue, polling now finds nothing to
+        // dispatch.
+        let assignment = control_plane.poll_task(WorkerId::new()).await.unwrap();
+        assert!(assignment.is_none());
     }
 
     #[tokio::test]

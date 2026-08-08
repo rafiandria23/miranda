@@ -10,20 +10,21 @@ use std::{error::Error, net::SocketAddr, sync::Arc};
 use tokio::net::TcpListener;
 use tracing::info;
 
-use crate::cli::{Cli, Role};
+use crate::cli::Cli;
 
 pub async fn run(args: Cli) -> Result<(), Box<dyn Error>> {
-    match args.role {
-        Role::ControlPlane => run_control_plane(args).await,
-        Role::Worker => run_worker(args).await,
-        Role::Both => run_both(args).await,
+    match (args.control_plane, args.worker) {
+        (true, true) => run_colocated(args).await,
+        (true, false) => run_control_plane_only(args).await,
+        (false, true) => run_worker_only(args).await,
+        (false, false) => Err("must specify at least one of --control-plane or --worker".into()),
     }
 }
 
-async fn run_control_plane(args: Cli) -> Result<(), Box<dyn Error>> {
+async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
     let database_url = args
         .database_url
-        .ok_or("--database-url is required for --role control-plane")?;
+        .ok_or("--database-url is required when using --control-plane")?;
     let control_plane = Arc::new(build_control_plane(&database_url).await?);
 
     let grpc_addr = args.grpc_bind.parse()?;
@@ -50,10 +51,10 @@ async fn run_control_plane(args: Cli) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn run_worker(args: Cli) -> Result<(), Box<dyn Error>> {
+async fn run_worker_only(args: Cli) -> Result<(), Box<dyn Error>> {
     let control_plane_url = args
         .control_plane_url
-        .ok_or("--control-plane-url is required for --role worker")?;
+        .ok_or("--control-plane-url is required when using --worker without --control-plane")?;
 
     let client =
         Arc::new(crate::grpc::client::RemoteControlPlaneClient::connect(control_plane_url).await?);
@@ -74,11 +75,11 @@ async fn run_worker(args: Cli) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-async fn run_both(args: Cli) -> Result<(), Box<dyn Error>> {
+async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
     let database_url = args
         .database_url
         .clone()
-        .ok_or("--database-url is required for --role both")?;
+        .ok_or("--database-url is required when using --control-plane and --worker together")?;
 
     let control_plane = Arc::new(build_control_plane(&database_url).await?);
 

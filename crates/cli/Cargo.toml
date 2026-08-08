@@ -14,11 +14,10 @@ miranda-storage-sqlite = { path = "../storage-sqlite" }
 miranda-worker = { path = "../worker" }
 
 clap = { workspace = true }
+dirs = { workspace = true }
 reqwest = { workspace = true }
 serde = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
-
-dirs = { version = "6.0.0" }

@@ -3,7 +3,7 @@ use miranda_core::id::WorkerId;
 use miranda_worker::{ControlPlaneClient, WorkerError, assignment::TaskAssignment};
 use std::{collections::HashSet, sync::Arc};
 
-use crate::role::ServerControlPlane;
+use crate::bootstrap::ServerControlPlane;
 
 pub struct LocalControlPlaneClient {
     control_plane: Arc<ServerControlPlane>,

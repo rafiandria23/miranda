@@ -15,7 +15,7 @@ use miranda_core::{
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
-use crate::role::ServerControlPlane;
+use crate::bootstrap::ServerControlPlane;
 
 struct ApiError(StatusCode, String);
 

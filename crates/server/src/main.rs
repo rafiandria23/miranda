@@ -1,8 +1,8 @@
 mod api;
+mod bootstrap;
 mod cli;
 mod grpc;
 mod local_client;
-mod role;
 
 use clap::Parser;
 use std::process::ExitCode;
@@ -15,7 +15,7 @@ async fn main() -> ExitCode {
 
     let args = Cli::parse();
 
-    match role::run(args).await {
+    match bootstrap::run(args).await {
         Ok(()) => ExitCode::SUCCESS,
         Err(e) => {
             eprintln!("error: {e}");
