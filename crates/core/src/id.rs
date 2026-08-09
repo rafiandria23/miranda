@@ -114,6 +114,11 @@ define_id!(
 );
 
 define_id!(
+    // Unique identifier for a task's entry in the dispatch queue.
+    TaskQueueEntryId
+);
+
+define_id!(
     // Unique identifier for a worker process executing workflow tasks.
     WorkerId
 );

@@ -1,17 +1,30 @@
 use miranda_core::{
     execution::Execution,
-    id::{ExecutionId, WorkflowId, WorkflowVersionId},
+    id::{ExecutionId, WorkerId, WorkflowId, WorkflowVersionId},
+    queue::QueuedTask,
+    router::WorkerRegistration,
     workflow::WorkflowDefinition,
 };
-use std::{collections::HashMap, future::Future, pin::Pin, sync::Arc};
+use std::{
+    collections::{HashMap, VecDeque},
+    future::Future,
+    pin::Pin,
+    sync::Arc,
+};
+use time::{Duration, OffsetDateTime};
 use tokio::sync::RwLock;
 
-use crate::{StorageError, WorkflowStore};
+use crate::{
+    error::StorageError, router_store::RouterStore, task_queue_store::TaskQueueStore,
+    workflow_store::WorkflowStore,
+};
 
 #[derive(Default, Clone)]
 pub struct MemoryStore {
     definitions: Arc<RwLock<HashMap<WorkflowVersionId, (WorkflowId, u64, WorkflowDefinition)>>>,
-    executions: Arc<RwLock<HashMap<ExecutionId, (Execution, u64)>>>, // (Execution, Version)
+    executions: Arc<RwLock<HashMap<ExecutionId, (Execution, u64)>>>,
+    queue: Arc<RwLock<VecDeque<QueuedTask>>>,
+    workers: Arc<RwLock<HashMap<WorkerId, WorkerRegistration>>>,
 }
 
 impl MemoryStore {
@@ -19,6 +32,94 @@ impl MemoryStore {
         Self::default()
     }
 }
+
+// =========================================================================
+// Queue Store Implementation
+// =========================================================================
+
+impl TaskQueueStore for MemoryStore {
+    async fn enqueue(&self, task: QueuedTask) -> Result<(), StorageError> {
+        self.queue.write().await.push_back(task);
+
+        Ok(())
+    }
+
+    async fn dequeue(&self) -> Result<Option<QueuedTask>, StorageError> {
+        Ok(self.queue.write().await.pop_front())
+    }
+}
+
+// =========================================================================
+// Router Store Implementation
+// =========================================================================
+
+impl RouterStore for MemoryStore {
+    async fn register_worker(&self, registration: WorkerRegistration) -> Result<(), StorageError> {
+        self.workers
+            .write()
+            .await
+            .insert(registration.id(), registration);
+
+        Ok(())
+    }
+
+    async fn deregister_worker(&self, id: WorkerId) -> Result<(), StorageError> {
+        self.workers.write().await.remove(&id);
+
+        Ok(())
+    }
+
+    async fn touch_worker(&self, id: WorkerId) -> Result<(), StorageError> {
+        if let Some(reg) = self.workers.write().await.get_mut(&id) {
+            *reg = reg.clone().with_heartbeat(OffsetDateTime::now_utc());
+        }
+
+        Ok(())
+    }
+
+    async fn select_worker(&self, capability: &str) -> Result<Option<WorkerId>, StorageError> {
+        Ok(self
+            .workers
+            .read()
+            .await
+            .values()
+            .find(|reg| reg.has_capability(capability))
+            .map(|reg| reg.id()))
+    }
+
+    async fn worker_has_capability(
+        &self,
+        id: WorkerId,
+        capability: &str,
+    ) -> Result<bool, StorageError> {
+        Ok(self
+            .workers
+            .read()
+            .await
+            .get(&id)
+            .is_some_and(|reg| reg.has_capability(capability)))
+    }
+
+    async fn reap_stale_workers(&self, threshold: Duration) -> Result<Vec<WorkerId>, StorageError> {
+        let mut workers = self.workers.write().await;
+
+        let stale: Vec<WorkerId> = workers
+            .values()
+            .filter(|reg| reg.is_stale(threshold))
+            .map(|reg| reg.id())
+            .collect();
+
+        for id in &stale {
+            workers.remove(&id);
+        }
+
+        Ok(stale)
+    }
+}
+
+// =========================================================================
+// Workflow Store Implementation
+// =========================================================================
 
 impl WorkflowStore for MemoryStore {
     fn save_definition<'a>(
