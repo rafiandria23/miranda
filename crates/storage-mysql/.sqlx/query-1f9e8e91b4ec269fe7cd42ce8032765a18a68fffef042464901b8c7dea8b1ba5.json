@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE workers SET last_heartbeat = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "1f9e8e91b4ec269fe7cd42ce8032765a18a68fffef042464901b8c7dea8b1ba5"
+}

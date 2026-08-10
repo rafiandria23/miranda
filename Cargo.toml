@@ -16,14 +16,15 @@ reqwest = { version = "0.13.4", features = ["json", "query"] }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = { version = "1.0.151" }
 sqlx = { version = "0.9.0", features = [
-  "runtime-tokio",
-  "tls-rustls",
-  "uuid",
   "json",
   "macros",
   "migrate",
+  "runtime-tokio",
+  "time",
+  "tls-rustls",
+  "uuid",
 ] }
-time = { version = "0.3.55", features = ["serde", "parsing", "formatting"] }
+time = { version = "0.3.55", features = ["formatting", "parsing", "serde"] }
 thiserror = { version = "2.0.19" }
 tokio = { version = "1.53.1", features = ["full"] }
 tokio-util = { version = "0.7.19" }

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n                INSERT INTO task_queue (id, execution_id, workflow_task_id)\n                VALUES (?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "26f4fcb5ddd8ffaa5c5db0d02557b5ed63ad0bb6aa65a99039f6b115b5bcbae5"
+}

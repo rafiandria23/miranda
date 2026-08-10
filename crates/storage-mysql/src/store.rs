@@ -1,11 +1,13 @@
 use miranda_core::{
     execution::{Execution, ExecutionStatus},
-    id::{ExecutionId, WorkflowId, WorkflowVersionId},
+    id::{ExecutionId, TaskQueueEntryId, WorkflowId, WorkflowVersionId},
+    queue::QueuedTask,
     workflow::WorkflowDefinition,
 };
-use miranda_storage::{StorageError, WorkflowStore};
+use miranda_storage::{RouterStore, StorageError, TaskQueueStore, WorkflowStore};
 use sqlx::mysql::{MySqlPool, MySqlPoolOptions};
 use std::{future::Future, pin::Pin};
+use time::{Duration, OffsetDateTime};
 
 use crate::MySqlConfig;
 
@@ -84,6 +86,253 @@ fn map_insert_error(err: sqlx::Error) -> StorageError {
 
     StorageError::Backend(err.to_string())
 }
+
+// =========================================================================
+// Queue Store Implementation
+// =========================================================================
+
+impl TaskQueueStore for MySqlStore {
+    fn enqueue<'a>(
+        &'a self,
+        task: miranda_core::queue::QueuedTask,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let id_str = task.id().to_string();
+            let execution_id_str = task.execution_id().to_string();
+            let workflow_task_id_str = task.workflow_task_id().to_string();
+
+            sqlx::query!(
+                r#"
+                INSERT INTO task_queue (id, execution_id, workflow_task_id)
+                VALUES (?, ?, ?)
+                "#,
+                id_str,
+                execution_id_str,
+                workflow_task_id_str,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn dequeue<'a>(
+        &'a self,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Option<miranda_core::queue::QueuedTask>, StorageError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let mut tx = self
+                .pool
+                .begin()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            let row = sqlx::query!(
+                r#"
+                SELECT id, execution_id, workflow_task_id FROM task_queue
+                ORDER BY enqueued_at ASC
+                LIMIT 1
+                FOR UPDATE SKIP LOCKED
+                "#
+            )
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            let Some(row) = row else {
+                return Ok(None);
+            };
+
+            sqlx::query!(r#"DELETE FROM task_queue WHERE id = ?"#, row.id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            tx.commit()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            let id: TaskQueueEntryId = row
+                .id
+                .parse()
+                .map_err(|e: uuid::Error| StorageError::Serialization(e.to_string()))?;
+            let execution_id: ExecutionId = row
+                .execution_id
+                .parse()
+                .map_err(|e: uuid::Error| StorageError::Serialization(e.to_string()))?;
+            let workflow_task_id = row
+                .workflow_task_id
+                .parse()
+                .map_err(|e: uuid::Error| StorageError::Serialization(e.to_string()))?;
+
+            Ok(Some(QueuedTask::from_parts(
+                id,
+                execution_id,
+                workflow_task_id,
+            )))
+        })
+    }
+}
+
+// =========================================================================
+// Router Store Implementation
+// =========================================================================
+
+impl RouterStore for MySqlStore {
+    fn register_worker<'a>(
+        &'a self,
+        registration: miranda_core::router::WorkerRegistration,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let id_str = registration.id().to_string();
+            let capabilities_json = serde_json::to_value(registration.capabilities())
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
+
+            sqlx::query!(
+                r#"
+                INSERT INTO workers (id, capabilities, last_heartbeat)
+                VALUES (?, ?, ?)
+                ON DUPLICATE KEY UPDATE capabilities = VALUES(capabilities), last_heartbeat = VALUES(last_heartbeat)
+                "#,
+                id_str,
+                capabilities_json,
+                registration.last_heartbeat(),
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn deregister_worker<'a>(
+        &'a self,
+        id: miranda_core::id::WorkerId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let id_str = id.to_string();
+
+            sqlx::query!(r#"DELETE FROM workers WHERE id = ?"#, id_str)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn touch_worker<'a>(
+        &'a self,
+        id: miranda_core::id::WorkerId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let id_str = id.to_string();
+            let now = OffsetDateTime::now_utc();
+
+            sqlx::query!(
+                r#"UPDATE workers SET last_heartbeat = ? WHERE id = ?"#,
+                now,
+                id_str,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn select_worker<'a>(
+        &'a self,
+        capability: &'a str,
+    ) -> Pin<
+        Box<
+            dyn Future<Output = Result<Option<miranda_core::id::WorkerId>, StorageError>>
+                + Send
+                + 'a,
+        >,
+    > {
+        Box::pin(async move {
+            let capability_json = serde_json::Value::String(capability.to_owned());
+
+            let row = sqlx::query!(
+                r#"SELECT id FROM workers WHERE JSON_CONTAINS(capabilities, ?) LIMIT 1"#,
+                capability_json,
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            row.map(|r| {
+                r.id.parse()
+                    .map_err(|e: uuid::Error| StorageError::Serialization(e.to_string()))
+            })
+            .transpose()
+        })
+    }
+
+    fn worker_has_capability<'a>(
+        &'a self,
+        id: miranda_core::id::WorkerId,
+        capability: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let id_str = id.to_string();
+            let capability_json = serde_json::Value::String(capability.to_owned());
+
+            let row: Option<(i64,)> = sqlx::query_as(
+                r#"SELECT 1 FROM workers WHERE id = ? AND JSON_CONTAINS(capabilities, ?)"#,
+            )
+            .bind(&id_str)
+            .bind(&capability_json)
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(row.is_some())
+        })
+    }
+
+    fn reap_stale_workers<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<
+        Box<dyn Future<Output = Result<Vec<miranda_core::id::WorkerId>, StorageError>> + Send + 'a>,
+    > {
+        Box::pin(async move {
+            let cutoff = OffsetDateTime::now_utc() - threshold;
+
+            let rows = sqlx::query!(r#"SELECT id FROM workers WHERE last_heartbeat < ?"#, cutoff)
+                .fetch_all(&self.pool)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            sqlx::query!(r#"DELETE FROM workers WHERE last_heartbeat < ?"#, cutoff)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            rows.into_iter()
+                .map(|r| {
+                    r.id.parse()
+                        .map_err(|e: uuid::Error| StorageError::Serialization(e.to_string()))
+                })
+                .collect()
+        })
+    }
+}
+
+// =========================================================================
+// Workflow Store Implementation
+// =========================================================================
 
 impl WorkflowStore for MySqlStore {
     fn save_definition<'a>(

@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM workers WHERE last_heartbeat < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "010edac267c891a707efaac7cfa4326ccf164b0c7de12d99f01b5b357c220849"
+}

@@ -38,14 +38,21 @@ impl MemoryStore {
 // =========================================================================
 
 impl TaskQueueStore for MemoryStore {
-    async fn enqueue(&self, task: QueuedTask) -> Result<(), StorageError> {
-        self.queue.write().await.push_back(task);
+    fn enqueue<'a>(
+        &'a self,
+        task: QueuedTask,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.queue.write().await.push_back(task);
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn dequeue(&self) -> Result<Option<QueuedTask>, StorageError> {
-        Ok(self.queue.write().await.pop_front())
+    fn dequeue<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<QueuedTask>, StorageError>> + Send + 'a>> {
+        Box::pin(async move { Ok(self.queue.write().await.pop_front()) })
     }
 }
 
@@ -54,66 +61,93 @@ impl TaskQueueStore for MemoryStore {
 // =========================================================================
 
 impl RouterStore for MemoryStore {
-    async fn register_worker(&self, registration: WorkerRegistration) -> Result<(), StorageError> {
-        self.workers
-            .write()
-            .await
-            .insert(registration.id(), registration);
+    fn register_worker<'a>(
+        &'a self,
+        registration: WorkerRegistration,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.workers
+                .write()
+                .await
+                .insert(registration.id(), registration);
 
-        Ok(())
+            Ok(())
+        })
     }
 
-    async fn deregister_worker(&self, id: WorkerId) -> Result<(), StorageError> {
-        self.workers.write().await.remove(&id);
-
-        Ok(())
-    }
-
-    async fn touch_worker(&self, id: WorkerId) -> Result<(), StorageError> {
-        if let Some(reg) = self.workers.write().await.get_mut(&id) {
-            *reg = reg.clone().with_heartbeat(OffsetDateTime::now_utc());
-        }
-
-        Ok(())
-    }
-
-    async fn select_worker(&self, capability: &str) -> Result<Option<WorkerId>, StorageError> {
-        Ok(self
-            .workers
-            .read()
-            .await
-            .values()
-            .find(|reg| reg.has_capability(capability))
-            .map(|reg| reg.id()))
-    }
-
-    async fn worker_has_capability(
-        &self,
+    fn deregister_worker<'a>(
+        &'a self,
         id: WorkerId,
-        capability: &str,
-    ) -> Result<bool, StorageError> {
-        Ok(self
-            .workers
-            .read()
-            .await
-            .get(&id)
-            .is_some_and(|reg| reg.has_capability(capability)))
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.workers.write().await.remove(&id);
+
+            Ok(())
+        })
     }
 
-    async fn reap_stale_workers(&self, threshold: Duration) -> Result<Vec<WorkerId>, StorageError> {
-        let mut workers = self.workers.write().await;
+    fn touch_worker<'a>(
+        &'a self,
+        id: WorkerId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            if let Some(reg) = self.workers.write().await.get_mut(&id) {
+                *reg = reg.clone().with_heartbeat(OffsetDateTime::now_utc());
+            }
 
-        let stale: Vec<WorkerId> = workers
-            .values()
-            .filter(|reg| reg.is_stale(threshold))
-            .map(|reg| reg.id())
-            .collect();
+            Ok(())
+        })
+    }
 
-        for id in &stale {
-            workers.remove(&id);
-        }
+    fn select_worker<'a>(
+        &'a self,
+        capability: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<WorkerId>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            Ok(self
+                .workers
+                .read()
+                .await
+                .values()
+                .find(|reg| reg.has_capability(capability))
+                .map(|reg| reg.id()))
+        })
+    }
 
-        Ok(stale)
+    fn worker_has_capability<'a>(
+        &'a self,
+        id: WorkerId,
+        capability: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            Ok(self
+                .workers
+                .read()
+                .await
+                .get(&id)
+                .is_some_and(|reg| reg.has_capability(capability)))
+        })
+    }
+
+    fn reap_stale_workers<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<WorkerId>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut workers = self.workers.write().await;
+
+            let stale: Vec<WorkerId> = workers
+                .values()
+                .filter(|reg| reg.is_stale(threshold))
+                .map(|reg| reg.id())
+                .collect();
+
+            for id in &stale {
+                workers.remove(id);
+            }
+
+            Ok(stale)
+        })
     }
 }
 
