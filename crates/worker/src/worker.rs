@@ -8,6 +8,7 @@ use tokio::{
     sync::{RwLock, mpsc},
     task::{JoinHandle, JoinSet},
 };
+use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
@@ -249,6 +250,15 @@ async fn run_poll_loop<C: ControlPlaneClient>(
     shutdown: CancellationToken,
     assignment_tx: mpsc::Sender<TaskAssignment>,
 ) {
+    let mut notifications = match control_plane.subscribe(worker_id, &capabilities).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            warn!(worker_id = %worker_id, error = %e, "subscribe failed, falling back to timer-only polling");
+
+            Box::pin(tokio_stream::pending())
+        }
+    };
+
     loop {
         tokio::select! {
             biased;
@@ -259,19 +269,23 @@ async fn run_poll_loop<C: ControlPlaneClient>(
                 return;
             }
 
-            _ = tokio::time::sleep(poll_interval) => {
-                match control_plane.poll_task(worker_id, &capabilities).await {
-                    Ok(Some(assignment)) => {
-                        if assignment_tx.send(assignment).await.is_err() {
-                            return;
-                        }
-                    }
+            _ = tokio::time::sleep(poll_interval) => {}
 
-                    Ok(None) => debug!(worker_id = %worker_id, "no tasks available"),
+            _ = notifications.next() => {
+                debug!(worker_id = %worker_id, "woken by task notification");
+            }
+        }
 
-                    Err(e) => warn!(worker_id = %worker_id, error = %e, "poll failed"),
+        match control_plane.poll_task(worker_id, &capabilities).await {
+            Ok(Some(assignment)) => {
+                if assignment_tx.send(assignment).await.is_err() {
+                    return;
                 }
             }
+
+            Ok(None) => debug!(worker_id = %worker_id, "no tasks available"),
+
+            Err(e) => warn!(worker_id = %worker_id, error = %e, "poll failed"),
         }
     }
 }

@@ -1,5 +1,6 @@
 use miranda_core::{id::WorkerId, workflow::WorkflowTask};
-use std::{collections::HashSet, future::Future, time::Duration};
+use std::{collections::HashSet, future::Future, pin::Pin, time::Duration};
+use tokio_stream::Stream;
 
 use crate::WorkerError;
 
@@ -39,4 +40,10 @@ pub trait ControlPlaneClient: Send + Sync + 'static {
         lease_token: String,
         result: Result<(), WorkerError>,
     ) -> impl Future<Output = Result<(), WorkerError>> + Send;
+
+    fn subscribe(
+        &self,
+        worker_id: WorkerId,
+        capabilities: &HashSet<String>,
+    ) -> impl Future<Output = Result<Pin<Box<dyn Stream<Item = ()> + Send>>, WorkerError>> + Send;
 }

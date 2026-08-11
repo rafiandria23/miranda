@@ -4,7 +4,8 @@ use miranda_worker::{
     assignment::{ControlPlaneClient, TaskAssignment},
     error::WorkerError,
 };
-use std::{collections::HashSet, sync::Arc};
+use std::{collections::HashSet, pin::Pin, sync::Arc};
+use tokio_stream::Stream;
 
 use crate::bootstrap::ServerControlPlane;
 
@@ -69,6 +70,14 @@ impl ControlPlaneClient for LocalControlPlaneClient {
             .report_result(worker_id, lease_token, result)
             .await
             .map_err(to_worker_error)
+    }
+
+    async fn subscribe(
+        &self,
+        _worker_id: WorkerId,
+        _capabilities: &HashSet<String>,
+    ) -> Result<Pin<Box<dyn Stream<Item = ()> + Send>>, WorkerError> {
+        Ok(Box::pin(tokio_stream::pending()))
     }
 }
 
