@@ -1,7 +1,7 @@
 use miranda_control_plane::{
     control_plane::ControlPlane,
     dispatcher::{DispatchStrategy, Dispatcher},
-    notifier::{NullTaskNotifier, TaskNotifier},
+    notifier::TaskNotifier,
     queue::{DurableTaskQueue, TaskQueue},
     router::{DurableRouter, Router},
 };
@@ -17,7 +17,7 @@ use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
 
-use crate::cli::Cli;
+use crate::{cli::Cli, grpc::worker_service::notifier::GrpcTaskNotifier};
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
@@ -31,11 +31,15 @@ pub type ServerControlPlane = ControlPlane<
     Arc<dyn TaskNotifier>,
 >;
 
-async fn build_control_plane(database_url: &str) -> Result<ServerControlPlane, Box<dyn Error>> {
+async fn build_control_plane(
+    database_url: &str,
+) -> Result<(ServerControlPlane, GrpcTaskNotifier), Box<dyn Error>> {
     let store: Arc<dyn WorkflowStore>;
     let queue: Arc<dyn TaskQueue>;
     let router: Arc<dyn Router>;
-    let notifier: Arc<dyn TaskNotifier> = Arc::new(NullTaskNotifier);
+
+    let grpc_notifier = GrpcTaskNotifier::new();
+    let notifier: Arc<dyn TaskNotifier> = Arc::new(grpc_notifier.clone());
 
     if database_url.starts_with("mysql://") {
         let backend = Arc::new(MySqlStore::connect(MySqlConfig::new(database_url)).await?);
@@ -58,7 +62,9 @@ async fn build_control_plane(database_url: &str) -> Result<ServerControlPlane, B
 
     let dispatch = Dispatcher::new(queue.clone());
 
-    Ok(ControlPlane::new(queue, router, store, dispatch, notifier))
+    let control_plane = ControlPlane::new(queue, router, store, dispatch, notifier);
+
+    Ok((control_plane, grpc_notifier))
 }
 
 async fn run_reaper<Q, R, S, D, N>(
@@ -94,7 +100,8 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
     let database_url = args
         .database_url
         .ok_or("--database-url is required when using --control-plane")?;
-    let control_plane = Arc::new(build_control_plane(&database_url).await?);
+    let (control_plane, notifier) = build_control_plane(&database_url).await?;
+    let control_plane = Arc::new(control_plane);
 
     let grpc_addr = args.grpc_bind.parse()?;
     let http_addr: SocketAddr = args.http_bind.parse()?;
@@ -103,7 +110,8 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
 
     tokio::spawn(run_reaper(control_plane.clone(), Duration::from_secs(30)));
 
-    let grpc_server = crate::grpc::worker_service::service::serve(control_plane.clone(), grpc_addr);
+    let grpc_server =
+        crate::grpc::worker_service::service::serve(control_plane.clone(), notifier, grpc_addr);
 
     let http_router = crate::http::router(control_plane.clone());
     let http_listener = TcpListener::bind(http_addr).await?;
@@ -154,7 +162,8 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
         .clone()
         .ok_or("--database-url is required when using --control-plane and --worker together")?;
 
-    let control_plane = Arc::new(build_control_plane(&database_url).await?);
+    let (control_plane, notifier) = build_control_plane(&database_url).await?;
+    let control_plane = Arc::new(control_plane);
 
     let client = Arc::new(crate::local_client::LocalControlPlaneClient::new(
         control_plane.clone(),
@@ -175,7 +184,8 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
 
     tokio::spawn(run_reaper(control_plane.clone(), Duration::from_secs(30)));
 
-    let grpc_server = crate::grpc::worker_service::service::serve(control_plane.clone(), grpc_addr);
+    let grpc_server =
+        crate::grpc::worker_service::service::serve(control_plane.clone(), notifier, grpc_addr);
 
     let http_router = crate::http::router(control_plane.clone());
     let http_listener = TcpListener::bind(http_addr).await?;

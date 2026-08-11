@@ -1,11 +1,15 @@
 use miranda_control_plane::{
-    control_plane::ControlPlane, dispatcher::DispatchStrategy, queue::TaskQueue, router::Router,
+    control_plane::ControlPlane, dispatcher::DispatchStrategy, notifier::TaskNotifier,
+    queue::TaskQueue, router::Router,
 };
 use miranda_core::{id::WorkerId, workflow::WorkflowTask};
 use miranda_storage::workflow_store::WorkflowStore;
 use miranda_worker::error::WorkerError;
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, pin::Pin, sync::Arc};
+use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
 use tonic::{Request, Response, Status, transport::Server};
+
+use super::notifier::GrpcTaskNotifier;
 
 pub mod proto {
     tonic::include_proto!("miranda.worker.v1");
@@ -14,31 +18,39 @@ pub mod proto {
 use proto::{
     DeregisterRequest, DeregisterResponse, HeartbeatRequest, HeartbeatResponse, PollTaskRequest,
     PollTaskResponse, RegisterRequest, RegisterResponse, ReportResultRequest, ReportResultResponse,
-    TaskAssignment as ProtoTaskAssignment, TaskResult as ProtoTaskResult,
-    WorkflowTask as ProtoWorkflowTask,
+    SubscribeRequest, TaskAssignment as ProtoTaskAssignment, TaskNotification,
+    TaskResult as ProtoTaskResult, WorkflowTask as ProtoWorkflowTask,
     task_result::Outcome,
     worker_service_server::{WorkerService, WorkerServiceServer},
 };
 
 use super::super::error::to_status;
 
-pub struct WorkerServiceImpl<Q, R, S, D> {
-    control_plane: Arc<ControlPlane<Q, R, S, D>>,
+pub struct WorkerServiceImpl<Q, R, S, D, N> {
+    control_plane: Arc<ControlPlane<Q, R, S, D, N>>,
+    notifier: GrpcTaskNotifier,
 }
 
-impl<Q, R, S, D> WorkerServiceImpl<Q, R, S, D> {
-    pub fn new(control_plane: Arc<ControlPlane<Q, R, S, D>>) -> Self {
-        Self { control_plane }
+impl<Q, R, S, D, N> WorkerServiceImpl<Q, R, S, D, N> {
+    pub fn new(
+        control_plane: Arc<ControlPlane<Q, R, S, D, N>>,
+        notifier: GrpcTaskNotifier,
+    ) -> Self {
+        Self {
+            control_plane,
+            notifier,
+        }
     }
 }
 
 #[tonic::async_trait]
-impl<Q, R, S, D> WorkerService for WorkerServiceImpl<Q, R, S, D>
+impl<Q, R, S, D, N> WorkerService for WorkerServiceImpl<Q, R, S, D, N>
 where
     Q: TaskQueue + 'static,
     R: Router + 'static,
     S: WorkflowStore + 'static,
     D: DispatchStrategy + 'static,
+    N: TaskNotifier + 'static,
 {
     async fn register(
         &self,
@@ -66,6 +78,8 @@ where
             .deregister_worker(worker_id)
             .await
             .map_err(to_status)?;
+
+        self.notifier.unsubscribe(worker_id).await;
 
         Ok(Response::new(DeregisterResponse {}))
     }
@@ -125,10 +139,27 @@ where
 
         Ok(Response::new(ReportResultResponse {}))
     }
+
+    type SubscribeToTasksStream =
+        Pin<Box<dyn Stream<Item = Result<TaskNotification, Status>> + Send + 'static>>;
+
+    async fn subscribe_to_tasks(
+        &self,
+        request: Request<SubscribeRequest>,
+    ) -> Result<Response<Self::SubscribeToTasksStream>, Status> {
+        let req = request.into_inner();
+        let worker_id = parse_worker_id(&req.worker_id)?;
+
+        let rx = self.notifier.subscribe(worker_id).await;
+        let stream = ReceiverStream::new(rx).map(Ok);
+
+        Ok(Response::new(Box::pin(stream)))
+    }
 }
 
-pub async fn serve<Q, R, S, D>(
-    control_plane: Arc<ControlPlane<Q, R, S, D>>,
+pub async fn serve<Q, R, S, D, N>(
+    control_plane: Arc<ControlPlane<Q, R, S, D, N>>,
+    notifier: GrpcTaskNotifier,
     addr: SocketAddr,
 ) -> Result<(), tonic::transport::Error>
 where
@@ -136,8 +167,9 @@ where
     R: Router + 'static,
     S: WorkflowStore + 'static,
     D: DispatchStrategy + 'static,
+    N: TaskNotifier + 'static,
 {
-    let service = WorkerServiceImpl::new(control_plane);
+    let service = WorkerServiceImpl::new(control_plane, notifier);
 
     Server::builder()
         .add_service(WorkerServiceServer::new(service))
