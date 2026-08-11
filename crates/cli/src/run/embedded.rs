@@ -15,7 +15,7 @@ pub async fn run_from_yaml(yaml: &str) -> Result<(), Box<dyn Error>> {
     let execution = Execution::from_definition(WorkflowVersionId::new(), &definition)?;
 
     let config_dir = config_dir::resolve()?;
-    let db_path = config_dir.join("miranda.db");
+    let db_path = config_dir.join("miranda.sqlite");
 
     let store = SqliteStore::connect(SqliteConfig {
         path: db_path.to_string_lossy().into_owned(),
