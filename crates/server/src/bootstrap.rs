@@ -1,6 +1,7 @@
 use miranda_control_plane::{
     control_plane::ControlPlane,
     dispatcher::{DispatchStrategy, Dispatcher},
+    notifier::{NullTaskNotifier, TaskNotifier},
     queue::{DurableTaskQueue, TaskQueue},
     router::{DurableRouter, Router},
 };
@@ -27,12 +28,14 @@ pub type ServerControlPlane = ControlPlane<
     Arc<dyn Router>,
     Arc<dyn WorkflowStore>,
     Dispatcher<Arc<dyn TaskQueue>>,
+    Arc<dyn TaskNotifier>,
 >;
 
 async fn build_control_plane(database_url: &str) -> Result<ServerControlPlane, Box<dyn Error>> {
     let store: Arc<dyn WorkflowStore>;
     let queue: Arc<dyn TaskQueue>;
     let router: Arc<dyn Router>;
+    let notifier: Arc<dyn TaskNotifier> = Arc::new(NullTaskNotifier);
 
     if database_url.starts_with("mysql://") {
         let backend = Arc::new(MySqlStore::connect(MySqlConfig::new(database_url)).await?);
@@ -55,15 +58,18 @@ async fn build_control_plane(database_url: &str) -> Result<ServerControlPlane, B
 
     let dispatch = Dispatcher::new(queue.clone());
 
-    Ok(ControlPlane::new(queue, router, store, dispatch))
+    Ok(ControlPlane::new(queue, router, store, dispatch, notifier))
 }
 
-async fn run_reaper<Q, R, S, D>(control_plane: Arc<ControlPlane<Q, R, S, D>>, period: Duration)
-where
+async fn run_reaper<Q, R, S, D, N>(
+    control_plane: Arc<ControlPlane<Q, R, S, D, N>>,
+    period: Duration,
+) where
     Q: TaskQueue,
     R: Router,
     S: WorkflowStore,
     D: DispatchStrategy,
+    N: TaskNotifier,
 {
     let mut ticker = tokio::time::interval(period);
 

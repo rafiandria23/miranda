@@ -20,34 +20,38 @@ use crate::{
     dispatcher::DispatchStrategy,
     error::ControlPlaneError,
     lease_manager::{DEFAULT_LEASE_TTL, LeaseManager, LeaseToken},
+    notifier::TaskNotifier,
     queue::TaskQueue,
     router::{DEFAULT_WORKER_STALENESS_THRESHOLD, Router},
 };
 
-pub struct ControlPlane<Q, R, S, D> {
+pub struct ControlPlane<Q, R, S, D, N> {
     queue: Q,
     router: R,
     store: S,
     dispatch: D,
+    notifier: N,
     leases: LeaseManager,
     retry_policy: RetryPolicy,
     lease_ttl: Duration,
     worker_staleness_threshold: Duration,
 }
 
-impl<Q, R, S, D> ControlPlane<Q, R, S, D>
+impl<Q, R, S, D, N> ControlPlane<Q, R, S, D, N>
 where
     Q: TaskQueue,
     R: Router,
     S: WorkflowStore,
     D: DispatchStrategy,
+    N: TaskNotifier,
 {
-    pub fn new(queue: Q, router: R, store: S, dispatch: D) -> Self {
+    pub fn new(queue: Q, router: R, store: S, dispatch: D, notifier: N) -> Self {
         Self {
             queue,
             router,
             store,
             dispatch,
+            notifier,
             leases: LeaseManager::new(),
             retry_policy: RetryPolicy::default(),
             lease_ttl: DEFAULT_LEASE_TTL,
@@ -93,6 +97,10 @@ where
             for workflow_task_id in &dispatchable_ready {
                 let task = QueuedTask::new(execution.id(), *workflow_task_id);
                 self.queue.enqueue(task, definition.clone()).await?;
+            }
+
+            if !dispatchable_ready.is_empty() {
+                self.notifier.notify_ready().await;
             }
 
             if noop_ready.is_empty() {

@@ -2,6 +2,7 @@ pub mod control_plane;
 pub mod dispatcher;
 pub mod error;
 pub mod lease_manager;
+pub mod notifier;
 pub mod queue;
 pub mod router;
 

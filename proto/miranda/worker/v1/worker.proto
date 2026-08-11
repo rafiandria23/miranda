@@ -8,6 +8,7 @@ service WorkerService {
   rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
   rpc PollTask(PollTaskRequest) returns (PollTaskResponse);
   rpc ReportResult(ReportResultRequest) returns (ReportResultResponse);
+  rpc SubscribeToTasks(SubscribeRequest) returns (stream TaskNotification);
 }
 
 message RegisterRequest {
@@ -76,3 +77,10 @@ message Failure {
 }
 
 message ReportResultResponse {}
+
+message SubscribeRequest {
+  string worker_id = 1;
+  repeated string capabilities = 2;
+}
+
+message TaskNotification {}
