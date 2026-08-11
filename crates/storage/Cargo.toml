@@ -7,7 +7,7 @@ license.workspace = true
 [dependencies]
 miranda-core = { path = "../core" }
 
-time = { workspace = true }
 thiserror = { workspace = true }
+time = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

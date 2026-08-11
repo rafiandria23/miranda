@@ -10,8 +10,8 @@ miranda-storage = { path = "../storage" }
 
 serde_json = { workspace = true }
 sqlx = { workspace = true, features = ["sqlite"] }
-time = { workspace = true }
 thiserror = { workspace = true }
+time = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
 uuid = { workspace = true }
