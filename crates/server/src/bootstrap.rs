@@ -1,14 +1,17 @@
 use miranda_control_plane::{
-    ControlPlane, DispatchStrategy,
-    dispatcher::Dispatcher,
-    queue::{InMemoryTaskQueue, TaskQueue},
-    router::{InMemoryRouter, Router},
+    control_plane::ControlPlane,
+    dispatcher::{DispatchStrategy, Dispatcher},
+    queue::{DurableTaskQueue, TaskQueue},
+    router::{DurableRouter, Router},
 };
-use miranda_storage::WorkflowStore;
-use miranda_storage_mysql::{MySqlConfig, MySqlStore};
-use miranda_storage_postgres::{PostgresConfig, PostgresStore};
-use miranda_storage_sqlite::{SqliteConfig, SqliteStore};
-use miranda_worker::{Worker, WorkerConfig, executor::DispatchExecutor};
+use miranda_storage::workflow_store::WorkflowStore;
+use miranda_storage_mysql::{config::MySqlConfig, store::MySqlStore};
+use miranda_storage_postgres::{config::PostgresConfig, store::PostgresStore};
+use miranda_storage_sqlite::{config::SqliteConfig, store::SqliteStore};
+use miranda_worker::{
+    executor::DispatchExecutor,
+    worker::{Worker, WorkerConfig},
+};
 use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use tracing::{info, warn};
@@ -20,25 +23,36 @@ async fn shutdown_signal() {
 }
 
 pub type ServerControlPlane = ControlPlane<
-    InMemoryTaskQueue,
-    InMemoryRouter,
+    Arc<dyn TaskQueue>,
+    Arc<dyn Router>,
     Arc<dyn WorkflowStore>,
-    Dispatcher<InMemoryTaskQueue>,
+    Dispatcher<Arc<dyn TaskQueue>>,
 >;
 
 async fn build_control_plane(database_url: &str) -> Result<ServerControlPlane, Box<dyn Error>> {
-    let store: Arc<dyn WorkflowStore> = if database_url.starts_with("mysql://") {
-        Arc::new(MySqlStore::connect(MySqlConfig::new(database_url)).await?)
+    let store: Arc<dyn WorkflowStore>;
+    let queue: Arc<dyn TaskQueue>;
+    let router: Arc<dyn Router>;
+
+    if database_url.starts_with("mysql://") {
+        let backend = Arc::new(MySqlStore::connect(MySqlConfig::new(database_url)).await?);
+        queue = Arc::new(DurableTaskQueue::new(backend.clone()));
+        router = Arc::new(DurableRouter::new(backend.clone()));
+        store = backend;
     } else if database_url.starts_with("postgres://") || database_url.starts_with("postgresql://") {
-        Arc::new(PostgresStore::connect(PostgresConfig::new(database_url)).await?)
+        let backend = Arc::new(PostgresStore::connect(PostgresConfig::new(database_url)).await?);
+        queue = Arc::new(DurableTaskQueue::new(backend.clone()));
+        router = Arc::new(DurableRouter::new(backend.clone()));
+        store = backend;
     } else if let Some(path) = database_url.strip_prefix("sqlite://") {
-        Arc::new(SqliteStore::connect(SqliteConfig::new(path)).await?)
+        let backend = Arc::new(SqliteStore::connect(SqliteConfig::new(path)).await?);
+        queue = Arc::new(DurableTaskQueue::new(backend.clone()));
+        router = Arc::new(DurableRouter::new(backend.clone()));
+        store = backend;
     } else {
         return Err(format!("unsupported database URL scheme: {database_url}").into());
     };
 
-    let queue = InMemoryTaskQueue::new();
-    let router = InMemoryRouter::new();
     let dispatch = Dispatcher::new(queue.clone());
 
     Ok(ControlPlane::new(queue, router, store, dispatch))

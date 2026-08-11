@@ -1,6 +1,9 @@
-use miranda_control_plane::ControlPlaneError;
+use miranda_control_plane::error::ControlPlaneError;
 use miranda_core::id::WorkerId;
-use miranda_worker::{ControlPlaneClient, WorkerError, assignment::TaskAssignment};
+use miranda_worker::{
+    assignment::{ControlPlaneClient, TaskAssignment},
+    error::WorkerError,
+};
 use std::{collections::HashSet, sync::Arc};
 
 use crate::bootstrap::ServerControlPlane;

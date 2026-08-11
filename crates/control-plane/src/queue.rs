@@ -30,3 +30,29 @@ pub trait TaskQueue: Send + Sync {
         >,
     >;
 }
+
+impl TaskQueue for Arc<dyn TaskQueue + '_> {
+    fn enqueue<'a>(
+        &'a self,
+        task: QueuedTask,
+        definition: Arc<WorkflowDefinition>,
+    ) -> Pin<Box<dyn Future<Output = Result<(), ControlPlaneError>> + Send + 'a>> {
+        (**self).enqueue(task, definition)
+    }
+
+    fn dequeue<'a>(
+        &'a self,
+    ) -> Pin<
+        Box<
+            dyn Future<
+                    Output = Result<
+                        Option<(QueuedTask, Arc<WorkflowDefinition>)>,
+                        ControlPlaneError,
+                    >,
+                > + Send
+                + 'a,
+        >,
+    > {
+        (**self).dequeue()
+    }
+}
