@@ -1,6 +1,6 @@
 use miranda_core::{execution::Execution, id::WorkflowVersionId, spec};
 use miranda_engine::EmbeddedEngine;
-// use miranda_storage::MemoryStore;
+// use miranda_storage::InMemoryStore;
 // use miranda_storage_mysql::{MySqlConfig, MySqlStore};
 // use miranda_storage_postgres::{PostgresConfig, PostgresStore};
 use miranda_storage_sqlite::{SqliteConfig, SqliteStore};

@@ -455,24 +455,28 @@ where
 mod tests {
     use miranda_core::{execution::ExecutionStatus, id::WorkflowVersionId, workflow::WorkflowTask};
     use miranda_engine::retry::Backoff;
-    use miranda_storage::MemoryStore;
+    use miranda_storage::InMemoryStore;
 
     use crate::{dispatcher::Dispatcher, queue::InMemoryTaskQueue, router::InMemoryRouter};
 
     use super::*;
 
-    type TestControlPlane =
-        ControlPlane<InMemoryTaskQueue, InMemoryRouter, MemoryStore, Dispatcher<InMemoryTaskQueue>>;
+    type TestControlPlane = ControlPlane<
+        InMemoryTaskQueue,
+        InMemoryRouter,
+        InMemoryStore,
+        Dispatcher<InMemoryTaskQueue>,
+    >;
 
     fn harness() -> (
         TestControlPlane,
         InMemoryTaskQueue,
         InMemoryRouter,
-        MemoryStore,
+        InMemoryStore,
     ) {
         let queue = InMemoryTaskQueue::new();
         let router = InMemoryRouter::new();
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let dispatch = Dispatcher::new(queue.clone());
 
         let control_plane =
@@ -487,11 +491,11 @@ mod tests {
         TestControlPlane,
         InMemoryTaskQueue,
         InMemoryRouter,
-        MemoryStore,
+        InMemoryStore,
     ) {
         let queue = InMemoryTaskQueue::new();
         let router = InMemoryRouter::new();
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let dispatch = Dispatcher::new(queue.clone());
 
         let control_plane =
@@ -504,18 +508,18 @@ mod tests {
         (control_plane, queue, router, store)
     }
 
-    /// Wraps a `MemoryStore` and forces the first `conflicts_remaining`
+    /// Wraps a `InMemoryStore` and forces the first `conflicts_remaining`
     /// calls to `save_definition` to fail with `StorageError::Conflict`,
     /// simulating a unique-constraint violation from a real backend under
     /// concurrent `register_workflow` calls.
     #[derive(Clone)]
     struct ConflictingStore {
-        inner: MemoryStore,
+        inner: InMemoryStore,
         conflicts_remaining: Arc<std::sync::atomic::AtomicU32>,
     }
 
     impl ConflictingStore {
-        fn new(inner: MemoryStore, conflicts: u32) -> Self {
+        fn new(inner: InMemoryStore, conflicts: u32) -> Self {
             Self {
                 inner,
                 conflicts_remaining: Arc::new(std::sync::atomic::AtomicU32::new(conflicts)),
@@ -632,7 +636,7 @@ mod tests {
     // `workflow_version_id`, so tests exercising that path must persist it
     // themselves (unlike `submit_execution`, nothing else does this).
     async fn save_definition(
-        store: &MemoryStore,
+        store: &InMemoryStore,
         workflow_version_id: WorkflowVersionId,
         definition: &WorkflowDefinition,
     ) {
@@ -738,7 +742,7 @@ mod tests {
     async fn register_workflow_retries_on_conflict_and_eventually_succeeds() {
         let queue = InMemoryTaskQueue::new();
         let router = InMemoryRouter::new();
-        let inner_store = MemoryStore::new();
+        let inner_store = InMemoryStore::new();
         let store = ConflictingStore::new(inner_store.clone(), 3);
         let dispatch = Dispatcher::new(queue.clone());
 
@@ -759,7 +763,7 @@ mod tests {
     async fn register_workflow_fails_once_conflict_retries_are_exhausted() {
         let queue = InMemoryTaskQueue::new();
         let router = InMemoryRouter::new();
-        let inner_store = MemoryStore::new();
+        let inner_store = InMemoryStore::new();
         // More conflicts than register_workflow's internal retry budget, so
         // every attempt fails and the call must give up rather than loop
         // forever.
@@ -1193,7 +1197,7 @@ mod tests {
     async fn with_lease_ttl_overrides_default() {
         let queue = InMemoryTaskQueue::new();
         let router = InMemoryRouter::new();
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let dispatch = Dispatcher::new(queue.clone());
 
         let control_plane = ControlPlane::new(queue, router, store, dispatch)
@@ -1206,7 +1210,7 @@ mod tests {
     async fn with_worker_staleness_threshold_overrides_default() {
         let queue = InMemoryTaskQueue::new();
         let router = InMemoryRouter::new();
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let dispatch = Dispatcher::new(queue.clone());
 
         let control_plane = ControlPlane::new(queue, router, store, dispatch)
@@ -1230,7 +1234,7 @@ mod tests {
     #[tokio::test]
     async fn reap_expired_leases_fails_and_requeues_abandoned_running_tasks() {
         let queue = InMemoryTaskQueue::new();
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let dispatch = Dispatcher::new(queue.clone());
         let control_plane = ControlPlane::new(
             queue.clone(),
@@ -1283,7 +1287,7 @@ mod tests {
     async fn reap_stale_workers_removes_workers_past_the_staleness_threshold() {
         let queue = InMemoryTaskQueue::new();
         let router = InMemoryRouter::new();
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let dispatch = Dispatcher::new(queue.clone());
 
         let control_plane = ControlPlane::new(queue, router.clone(), store, dispatch)

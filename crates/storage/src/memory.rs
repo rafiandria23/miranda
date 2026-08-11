@@ -20,14 +20,14 @@ use crate::{
 };
 
 #[derive(Default, Clone)]
-pub struct MemoryStore {
+pub struct InMemoryStore {
     definitions: Arc<RwLock<HashMap<WorkflowVersionId, (WorkflowId, u64, WorkflowDefinition)>>>,
     executions: Arc<RwLock<HashMap<ExecutionId, (Execution, u64)>>>,
     queue: Arc<RwLock<VecDeque<QueuedTask>>>,
     workers: Arc<RwLock<HashMap<WorkerId, WorkerRegistration>>>,
 }
 
-impl MemoryStore {
+impl InMemoryStore {
     pub fn new() -> Self {
         Self::default()
     }
@@ -37,7 +37,7 @@ impl MemoryStore {
 // Queue Store Implementation
 // =========================================================================
 
-impl TaskQueueStore for MemoryStore {
+impl TaskQueueStore for InMemoryStore {
     fn enqueue<'a>(
         &'a self,
         task: QueuedTask,
@@ -60,7 +60,7 @@ impl TaskQueueStore for MemoryStore {
 // Router Store Implementation
 // =========================================================================
 
-impl RouterStore for MemoryStore {
+impl RouterStore for InMemoryStore {
     fn register_worker<'a>(
         &'a self,
         registration: WorkerRegistration,
@@ -155,7 +155,7 @@ impl RouterStore for MemoryStore {
 // Workflow Store Implementation
 // =========================================================================
 
-impl WorkflowStore for MemoryStore {
+impl WorkflowStore for InMemoryStore {
     fn save_definition<'a>(
         &'a self,
         workflow_id: WorkflowId,

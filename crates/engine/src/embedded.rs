@@ -145,7 +145,7 @@ mod tests {
         id::{WorkflowTaskId, WorkflowVersionId},
         workflow::WorkflowTask,
     };
-    use miranda_storage::MemoryStore;
+    use miranda_storage::InMemoryStore;
     use miranda_worker::{InProcessExecutor, WorkerError};
 
     use crate::retry::Backoff;
@@ -207,7 +207,7 @@ mod tests {
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
         let (executor, _calls) = scripted_executor(vec![Ok(())]);
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         let result = engine.run(execution, &definition).await.unwrap();
@@ -231,7 +231,7 @@ mod tests {
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
         let (executor, calls) = scripted_executor(vec![Ok(()), Ok(())]);
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         let result = engine.run(execution, &definition).await.unwrap();
@@ -252,7 +252,7 @@ mod tests {
             }),
             Ok(()),
         ]);
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store)
             .with_retry_policy(RetryPolicy::new(3, Backoff::Fixed(Duration::ZERO)));
 
@@ -271,7 +271,7 @@ mod tests {
         let (executor, _calls) = scripted_executor(vec![Err(WorkerError::ExecutionFailed {
             message: "fatal".to_owned(),
         })]);
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store)
             .with_retry_policy(RetryPolicy::new(0, Backoff::Fixed(Duration::ZERO)));
 
@@ -294,7 +294,7 @@ mod tests {
         let execution_id = execution.id();
 
         let (executor, _calls) = scripted_executor(vec![Ok(())]);
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         engine.run(execution, &definition).await.unwrap();
@@ -309,7 +309,7 @@ mod tests {
         let execution = new_execution();
 
         let (executor, calls) = scripted_executor(vec![]);
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         let result = engine.run(execution, &definition).await.unwrap();
@@ -325,7 +325,7 @@ mod tests {
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
         let (executor, calls) = scripted_executor(vec![]);
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         let result = engine.run(execution, &definition).await.unwrap();
@@ -350,7 +350,7 @@ mod tests {
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
         let (executor, calls) = scripted_executor(vec![Ok(())]);
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         let result = engine.run(execution, &definition).await.unwrap();
@@ -375,7 +375,7 @@ mod tests {
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
         let (executor, calls) = scripted_executor(vec![]);
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         let result = engine.run(execution, &definition).await.unwrap();
@@ -404,7 +404,7 @@ mod tests {
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
         let (executor, calls) = scripted_executor(vec![Ok(())]);
-        let store = MemoryStore::new();
+        let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         let result = engine.run(execution, &definition).await.unwrap();
