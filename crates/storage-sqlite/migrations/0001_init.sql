@@ -23,3 +23,18 @@ CREATE TABLE workflow_executions (
 
 CREATE INDEX idx_workflow_executions_status ON workflow_executions (status);
 CREATE INDEX idx_workflow_executions_version ON workflow_executions (workflow_version_id);
+
+CREATE TABLE task_queue (
+    id TEXT PRIMARY KEY NOT NULL,
+    execution_id TEXT NOT NULL,
+    workflow_task_id TEXT NOT NULL,
+    enqueued_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX idx_task_queue_enqueued_at ON task_queue (enqueued_at);
+
+CREATE TABLE workers (
+    id TEXT PRIMARY KEY NOT NULL,
+    capabilities TEXT NOT NULL,
+    last_heartbeat TEXT NOT NULL
+);

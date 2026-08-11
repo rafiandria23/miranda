@@ -8,10 +8,10 @@ license.workspace = true
 miranda-core = { path = "../core" }
 miranda-storage = { path = "../storage" }
 
+serde_json = { workspace = true }
+sqlx = { workspace = true, features = ["postgres"] }
 time = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }
-serde_json = { workspace = true }
-sqlx = { workspace = true, features = ["postgres"] }
 url = { workspace = true }

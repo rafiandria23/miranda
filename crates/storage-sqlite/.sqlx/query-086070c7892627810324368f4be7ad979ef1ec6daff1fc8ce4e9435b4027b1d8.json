@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM workers WHERE last_heartbeat < ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "086070c7892627810324368f4be7ad979ef1ec6daff1fc8ce4e9435b4027b1d8"
+}

@@ -1,0 +1,50 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT id, execution_id, workflow_task_id FROM task_queue\n                ORDER BY enqueued_at ASC\n                LIMIT 1\n                ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "task_queue",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "execution_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "task_queue",
+            "name": "execution_id"
+          }
+        }
+      },
+      {
+        "name": "workflow_task_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "task_queue",
+            "name": "workflow_task_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "b21fe72c9979851c39b525e46f405a88be225ae59f9d69f3c1dcd2f33ffcb9a8"
+}

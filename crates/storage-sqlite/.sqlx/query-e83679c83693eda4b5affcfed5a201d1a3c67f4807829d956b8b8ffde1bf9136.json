@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                SELECT w.id FROM workers w, json_each(w.capabilities) c\n                WHERE c.value = ?1\n                LIMIT 1\n                ",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "workers",
+            "name": "id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "e83679c83693eda4b5affcfed5a201d1a3c67f4807829d956b8b8ffde1bf9136"
+}

@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO workers (id, capabilities, last_heartbeat)\n                VALUES (?1, ?2, ?3)\n                ON CONFLICT (id) DO UPDATE SET capabilities = ?2, last_heartbeat = ?3\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "0b7e09fead4bb463a4eee266812f66e1c3ef656a2c9b7867cf4f01f79bd3b6a3"
+}

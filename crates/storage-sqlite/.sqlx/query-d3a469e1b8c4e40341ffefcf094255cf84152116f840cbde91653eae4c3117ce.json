@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO task_queue (id, execution_id, workflow_task_id)\n                VALUES (?1, ?2, ?3)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "d3a469e1b8c4e40341ffefcf094255cf84152116f840cbde91653eae4c3117ce"
+}
