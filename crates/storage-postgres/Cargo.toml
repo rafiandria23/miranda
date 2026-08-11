@@ -8,6 +8,7 @@ license.workspace = true
 miranda-core = { path = "../core" }
 miranda-storage = { path = "../storage" }
 
+time = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tracing = { workspace = true }

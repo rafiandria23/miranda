@@ -1,0 +1,16 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO workers (id, capabilities, last_heartbeat)\n                VALUES ($1, $2, $3)\n                ON CONFLICT (id) DO UPDATE SET capabilities = $2, last_heartbeat = $3\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Uuid",
+        "TextArray",
+        "Timestamptz"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "c47da4227e5f2d6378cd4f0322b338e13c4104bd77865d7874aaac48021ed43e"
+}

@@ -1,0 +1,50 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                SELECT id, execution_id, workflow_task_id FROM task_queue\n                ORDER BY enqueued_at ASC\n                FOR UPDATE SKIP LOCKED\n                LIMIT 1\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "task_queue",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "execution_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "task_queue",
+            "name": "execution_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "workflow_task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "task_queue",
+            "name": "workflow_task_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": []
+    },
+    "nullable": [
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "cebebadbf3bce0ec777fa1ba80121587f2551d36367050ede53f68249c0f0e72"
+}

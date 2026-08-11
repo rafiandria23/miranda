@@ -1,11 +1,14 @@
 use miranda_core::{
     execution::{Execution, ExecutionStatus},
-    id::{ExecutionId, WorkflowId, WorkflowVersionId},
+    id::{ExecutionId, TaskQueueEntryId, WorkerId, WorkflowId, WorkflowTaskId, WorkflowVersionId},
+    queue::QueuedTask,
+    router::WorkerRegistration,
     workflow::WorkflowDefinition,
 };
-use miranda_storage::{StorageError, WorkflowStore};
+use miranda_storage::{RouterStore, StorageError, TaskQueueStore, WorkflowStore};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::{future::Future, pin::Pin};
+use time::{Duration, OffsetDateTime};
 
 use crate::PostgresConfig;
 
@@ -83,6 +86,204 @@ fn map_insert_error(err: sqlx::Error) -> StorageError {
 
     StorageError::Backend(err.to_string())
 }
+
+// =========================================================================
+// Queue Store Implementation
+// =========================================================================
+
+impl TaskQueueStore for PostgresStore {
+    fn enqueue<'a>(
+        &'a self,
+        task: QueuedTask,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let id = task.id();
+            let execution_id = task.execution_id();
+            let workflow_task_id = task.workflow_task_id();
+
+            sqlx::query!(
+                r#"
+                INSERT INTO task_queue (id, execution_id, workflow_task_id)
+                VALUES ($1, $2, $3)
+                "#,
+                id.as_uuid(),
+                execution_id.as_uuid(),
+                workflow_task_id.as_uuid(),
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn dequeue<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<QueuedTask>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut tx = self
+                .pool
+                .begin()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            let row = sqlx::query!(
+                r#"
+                SELECT id, execution_id, workflow_task_id FROM task_queue
+                ORDER BY enqueued_at ASC
+                FOR UPDATE SKIP LOCKED
+                LIMIT 1
+                "#
+            )
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            let Some(row) = row else {
+                return Ok(None);
+            };
+
+            sqlx::query!(r#"DELETE FROM task_queue WHERE id = $1"#, row.id)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            tx.commit()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(Some(QueuedTask::from_parts(
+                TaskQueueEntryId::from_uuid(row.id),
+                ExecutionId::from_uuid(row.execution_id),
+                WorkflowTaskId::from_uuid(row.workflow_task_id),
+            )))
+        })
+    }
+}
+
+// =========================================================================
+// Router Store Implementation
+// =========================================================================
+
+impl RouterStore for PostgresStore {
+    fn register_worker<'a>(
+        &'a self,
+        registration: WorkerRegistration,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let id = registration.id();
+
+            sqlx::query!(
+                r#"
+                INSERT INTO workers (id, capabilities, last_heartbeat)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (id) DO UPDATE SET capabilities = $2, last_heartbeat = $3
+                "#,
+                id.as_uuid(),
+                registration.capabilities(),
+                registration.last_heartbeat(),
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn deregister_worker<'a>(
+        &'a self,
+        id: WorkerId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(r#"DELETE FROM workers WHERE id = $1"#, id.as_uuid())
+                .execute(&self.pool)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn touch_worker<'a>(
+        &'a self,
+        id: WorkerId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(
+                r#"UPDATE workers SET last_heartbeat = $1 WHERE id = $2"#,
+                OffsetDateTime::now_utc(),
+                id.as_uuid(),
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn select_worker<'a>(
+        &'a self,
+        capability: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<WorkerId>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let row = sqlx::query!(
+                r#"SELECT id FROM workers WHERE $1 = ANY(capabilities) LIMIT 1"#,
+                capability,
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(row.map(|r| WorkerId::from_uuid(r.id)))
+        })
+    }
+
+    fn worker_has_capability<'a>(
+        &'a self,
+        id: WorkerId,
+        capability: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query_scalar!(
+                r#"SELECT EXISTS(SELECT 1 FROM workers WHERE id = $1 AND $2 = ANY(capabilities)) as "exists!""#,
+                id.as_uuid(),
+                capability,
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))
+        })
+    }
+
+    fn reap_stale_workers<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<WorkerId>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let cutoff = OffsetDateTime::now_utc() - threshold;
+
+            let rows = sqlx::query!(
+                r#"DELETE FROM workers WHERE last_heartbeat < $1 RETURNING id"#,
+                cutoff,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(rows
+                .into_iter()
+                .map(|r| WorkerId::from_uuid(r.id))
+                .collect())
+        })
+    }
+}
+
+// =========================================================================
+// Workflow Store Implementation
+// =========================================================================
 
 impl WorkflowStore for PostgresStore {
     fn save_definition<'a>(
