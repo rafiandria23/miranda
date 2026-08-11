@@ -1,7 +1,7 @@
-mod api;
 mod bootstrap;
 mod cli;
 mod grpc;
+mod http;
 mod local_client;
 
 use clap::Parser;

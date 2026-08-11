@@ -1,0 +1,3 @@
+syntax = "proto3";
+
+package miranda.control_plane.v1;

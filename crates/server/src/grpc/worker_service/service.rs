@@ -1,9 +1,9 @@
 use miranda_control_plane::{
-    ControlPlane, ControlPlaneError, dispatcher::DispatchStrategy, queue::TaskQueue, router::Router,
+    control_plane::ControlPlane, dispatcher::DispatchStrategy, queue::TaskQueue, router::Router,
 };
 use miranda_core::{id::WorkerId, workflow::WorkflowTask};
-use miranda_storage::{StorageError, WorkflowStore};
-use miranda_worker::WorkerError;
+use miranda_storage::workflow_store::WorkflowStore;
+use miranda_worker::error::WorkerError;
 use std::{net::SocketAddr, sync::Arc};
 use tonic::{Request, Response, Status, transport::Server};
 
@@ -19,6 +19,8 @@ use proto::{
     task_result::Outcome,
     worker_service_server::{WorkerService, WorkerServiceServer},
 };
+
+use super::super::error::to_status;
 
 pub struct WorkerServiceImpl<Q, R, S, D> {
     control_plane: Arc<ControlPlane<Q, R, S, D>>,
@@ -168,32 +170,4 @@ fn from_proto_result(result: Option<ProtoTaskResult>) -> Result<Result<(), Worke
             message: failure.message,
         }),
     })
-}
-
-fn to_status(err: ControlPlaneError) -> Status {
-    match err {
-        ControlPlaneError::Domain(e) => Status::failed_precondition(e.to_string()),
-
-        ControlPlaneError::Storage(StorageError::WorkflowNotFound(_))
-        | ControlPlaneError::Storage(StorageError::WorkflowVersionNotFound(_))
-        | ControlPlaneError::Storage(StorageError::ExecutionNotFound(_))
-        | ControlPlaneError::Storage(StorageError::SnapshotNotFound { .. }) => {
-            Status::not_found(err.to_string())
-        }
-        ControlPlaneError::Storage(StorageError::OptimisticLockFailed { .. }) => {
-            Status::aborted(err.to_string())
-        }
-        ControlPlaneError::Storage(_) => Status::internal(err.to_string()),
-
-        ControlPlaneError::Engine(_) => Status::internal(err.to_string()),
-
-        ControlPlaneError::WorkerNotFound(_) => Status::not_found(err.to_string()),
-        ControlPlaneError::WorkerUnavailable(_) => Status::unavailable(err.to_string()),
-
-        ControlPlaneError::Queue(_) => Status::internal(err.to_string()),
-        ControlPlaneError::Routing(_) => Status::internal(err.to_string()),
-        ControlPlaneError::Scheduler(_) => Status::internal(err.to_string()),
-
-        ControlPlaneError::InvalidRequest(msg) => Status::invalid_argument(msg),
-    }
 }

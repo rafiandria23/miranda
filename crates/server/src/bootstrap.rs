@@ -97,9 +97,9 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
 
     tokio::spawn(run_reaper(control_plane.clone(), Duration::from_secs(30)));
 
-    let grpc_server = crate::grpc::service::serve(control_plane.clone(), grpc_addr);
+    let grpc_server = crate::grpc::worker_service::service::serve(control_plane.clone(), grpc_addr);
 
-    let http_router = crate::api::router(control_plane.clone());
+    let http_router = crate::http::router(control_plane.clone());
     let http_listener = TcpListener::bind(http_addr).await?;
     let http_server = axum::serve(http_listener, http_router);
 
@@ -121,8 +121,10 @@ async fn run_worker_only(args: Cli) -> Result<(), Box<dyn Error>> {
         .control_plane_url
         .ok_or("--control-plane-url is required when using --worker without --control-plane")?;
 
-    let client =
-        Arc::new(crate::grpc::client::RemoteControlPlaneClient::connect(control_plane_url).await?);
+    let client = Arc::new(
+        crate::grpc::worker_service::client::RemoteControlPlaneClient::connect(control_plane_url)
+            .await?,
+    );
     let executor = Arc::new(DispatchExecutor::new());
 
     let worker = Worker::new(args.capabilities, client, executor, WorkerConfig::default());
@@ -167,9 +169,9 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
 
     tokio::spawn(run_reaper(control_plane.clone(), Duration::from_secs(30)));
 
-    let grpc_server = crate::grpc::service::serve(control_plane.clone(), grpc_addr);
+    let grpc_server = crate::grpc::worker_service::service::serve(control_plane.clone(), grpc_addr);
 
-    let http_router = crate::api::router(control_plane.clone());
+    let http_router = crate::http::router(control_plane.clone());
     let http_listener = TcpListener::bind(http_addr).await?;
     let http_server = axum::serve(http_listener, http_router);
 

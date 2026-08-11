@@ -1,2 +1,2 @@
-pub mod client;
-pub mod service;
+pub mod error;
+pub mod worker_service;
