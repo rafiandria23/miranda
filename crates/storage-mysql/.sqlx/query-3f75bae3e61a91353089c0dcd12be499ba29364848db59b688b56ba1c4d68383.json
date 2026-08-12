@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n                INSERT INTO leases (token, execution_id, workflow_task_id, worker_id, expires_at)\n                VALUES (?, ?, ?, ?, ?)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "3f75bae3e61a91353089c0dcd12be499ba29364848db59b688b56ba1c4d68383"
+}

@@ -1,0 +1,99 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT token, execution_id, workflow_task_id, worker_id, expires_at FROM leases WHERE token = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "token",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | PRIMARY_KEY | NO_DEFAULT_VALUE",
+          "collation": 255,
+          "max_size": 1020
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.leases",
+            "name": "token"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "execution_id",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "collation": 255,
+          "max_size": 144
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.leases",
+            "name": "execution_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "workflow_task_id",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "collation": 255,
+          "max_size": 144
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.leases",
+            "name": "workflow_task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "worker_id",
+        "type_info": {
+          "type": "String",
+          "flags": "NOT_NULL | MULTIPLE_KEY | NO_DEFAULT_VALUE",
+          "collation": 255,
+          "max_size": 144
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.leases",
+            "name": "worker_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": {
+          "type": "Timestamp",
+          "flags": "NOT_NULL | BINARY | NO_DEFAULT_VALUE",
+          "collation": 63,
+          "max_size": 19
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.leases",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "05452196f4f21bc2d2fd767d9a9bbe950d441ee65e7ab7e9f7791f8ab74de3bf"
+}
