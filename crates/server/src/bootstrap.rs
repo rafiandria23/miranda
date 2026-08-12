@@ -18,7 +18,6 @@ use miranda_worker::{
 };
 use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
-use tracing::{info, warn};
 use uuid::Uuid;
 
 use crate::{cli::Cli, grpc::worker_service::notifier::GrpcTaskNotifier};
@@ -106,14 +105,14 @@ async fn run_reaper<Q, R, S, D, N, L>(
 
         match control_plane.reap_expired_leases().await {
             Ok(0) => {}
-            Ok(n) => info!(recovered = n, "reaped expired leases"),
-            Err(e) => warn!(error = %e, "reap_expired_leases failed"),
+            Ok(n) => tracing::info!(recovered = n, "reaped expired leases"),
+            Err(e) => tracing::warn!(error = %e, "reap_expired_leases failed"),
         }
 
         match control_plane.reap_stale_workers().await {
             Ok(0) => {}
-            Ok(n) => info!(removed = n, "reaped stale workers"),
-            Err(e) => warn!(error = %e, "reap_stale_workers failed"),
+            Ok(n) => tracing::info!(removed = n, "reaped stale workers"),
+            Err(e) => tracing::warn!(error = %e, "reap_stale_workers failed"),
         }
     }
 }
@@ -146,8 +145,8 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
     let grpc_addr = args.grpc_bind.parse()?;
     let http_addr: SocketAddr = args.http_bind.parse()?;
 
-    info!(grpc = %grpc_addr, http = %http_addr, "starting control-plane servers");
-    info!(
+    tracing::info!(grpc = %grpc_addr, http = %http_addr, "starting control-plane servers");
+    tracing::info!(
         "join a worker with: miranda-server --worker --control-plane-url http://{grpc_addr} --join-token {token}"
     );
 
@@ -166,7 +165,7 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
         result = http_server => result.map_err(|e| Box::new(e) as Box<dyn Error>)?,
 
         _ = shutdown_signal() => {
-            info!("shutdown signal received");
+            tracing::info!("shutdown signal received");
         }
     }
 
@@ -195,14 +194,27 @@ async fn run_worker_only(args: Cli) -> Result<(), Box<dyn Error>> {
         WorkerConfig::default(),
         token,
     );
+    let worker_id = worker.id();
 
-    info!(worker_id = %worker.id(), "starting worker");
+    let (handle, started) = worker.run();
 
-    let handle = worker.run();
+    match started.await {
+        Ok(Ok(())) => {
+            tracing::info!(worker_id = %worker_id, "worker started successfully");
+        }
+
+        Ok(Err(worker_error)) => {
+            return Err(format!("worker failed to start: {worker_error}").into());
+        }
+
+        Err(_) => {
+            return Err("worker task ended before reporting startup result".into());
+        }
+    }
 
     shutdown_signal().await;
 
-    info!("shutdown signal received, draining worker");
+    tracing::info!("shutdown signal received, draining worker");
 
     handle.shutdown().await.map_err(|e| e.to_string())?;
 
@@ -248,17 +260,17 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
         WorkerConfig::default(),
         String::new(),
     );
-    let worker_handle = worker.run();
+    let (worker_handle, _started) = worker.run();
 
     let grpc_addr = args.grpc_bind.parse()?;
     let http_addr: SocketAddr = args.http_bind.parse()?;
 
-    info!(
+    tracing::info!(
         grpc = %grpc_addr,
         http = %http_addr,
         "starting control-plane gRPC + HTTP servers (also serving co-located worker in-process)"
     );
-    info!(
+    tracing::info!(
         "join a worker with: miranda-server --worker --control-plane-url http://{grpc_addr} --join-token {token}"
     );
 
@@ -277,7 +289,7 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
         result = http_server => result.map_err(|e| Box::new(e) as Box<dyn Error>)?,
 
         _ = shutdown_signal() => {
-            info!("shutdown signal received, draining worker");
+            tracing::info!("shutdown signal received, draining worker");
 
             worker_handle.shutdown().await.map_err(|e| e.to_string())?;
         }
