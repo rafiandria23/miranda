@@ -28,6 +28,7 @@ impl ControlPlaneClient for RemoteControlPlaneClient {
         &self,
         worker_id: WorkerId,
         capabilities: &HashSet<String>,
+        token: &str,
     ) -> Result<(), WorkerError> {
         let mut client = self.client.clone();
 
@@ -35,6 +36,7 @@ impl ControlPlaneClient for RemoteControlPlaneClient {
             .register(RegisterRequest {
                 worker_id: worker_id.to_string(),
                 capabilities: capabilities.iter().cloned().collect(),
+                token: token.to_owned(),
             })
             .await
             .map_err(to_worker_error)?;

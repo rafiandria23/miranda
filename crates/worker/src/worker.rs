@@ -63,6 +63,7 @@ pub struct Worker<C, E> {
     control_plane: Arc<C>,
     executor: Arc<E>,
     config: WorkerConfig,
+    token: String,
 }
 
 impl<C, E> Worker<C, E>
@@ -75,6 +76,7 @@ where
         control_plane: Arc<C>,
         executor: Arc<E>,
         config: WorkerConfig,
+        token: String,
     ) -> Self {
         Self {
             id: WorkerId::new(),
@@ -82,6 +84,7 @@ where
             control_plane,
             executor,
             config,
+            token,
         }
     }
 
@@ -102,10 +105,13 @@ where
         let control_plane = self.control_plane;
         let executor = self.executor;
         let config = self.config;
+        let token = self.token;
 
         let task_handle = tokio::spawn(async move {
             info!(worker_id = %worker_id, "registering with control plane");
-            control_plane.register(worker_id, &capabilities).await?;
+            control_plane
+                .register(worker_id, &capabilities, &token)
+                .await?;
 
             let (active_tx, mut active_rx) = mpsc::channel::<()>(1);
 

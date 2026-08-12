@@ -15,6 +15,7 @@ pub trait ControlPlaneClient: Send + Sync + 'static {
         &self,
         worker_id: WorkerId,
         capabilities: &HashSet<String>,
+        token: &str,
     ) -> impl Future<Output = Result<(), WorkerError>> + Send;
 
     fn deregister(

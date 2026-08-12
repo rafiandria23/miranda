@@ -143,13 +143,23 @@ async fn run_worker_only(args: Cli) -> Result<(), Box<dyn Error>> {
         .control_plane_url
         .ok_or("--control-plane-url is required when using --worker without --control-plane")?;
 
+    let token = args
+        .join_token
+        .ok_or("--join-token is required when using --worker without --control-plane")?;
+
     let client = Arc::new(
         crate::grpc::worker_service::client::RemoteControlPlaneClient::connect(control_plane_url)
             .await?,
     );
     let executor = Arc::new(DispatchExecutor::new());
 
-    let worker = Worker::new(args.capabilities, client, executor, WorkerConfig::default());
+    let worker = Worker::new(
+        args.capabilities,
+        client,
+        executor,
+        WorkerConfig::default(),
+        token,
+    );
 
     info!(worker_id = %worker.id(), "starting worker");
 
@@ -178,7 +188,13 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
     ));
     let executor = Arc::new(DispatchExecutor::new());
 
-    let worker = Worker::new(args.capabilities, client, executor, WorkerConfig::default());
+    let worker = Worker::new(
+        args.capabilities,
+        client,
+        executor,
+        WorkerConfig::default(),
+        String::new(),
+    );
     let worker_handle = worker.run();
 
     let grpc_addr = args.grpc_bind.parse()?;

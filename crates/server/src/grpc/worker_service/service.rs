@@ -61,6 +61,11 @@ where
         let worker_id = parse_worker_id(&req.worker_id)?;
 
         self.control_plane
+            .validate_join_token(&req.token)
+            .await
+            .map_err(to_status)?;
+
+        self.control_plane
             .register_worker(worker_id, req.capabilities)
             .await
             .map_err(to_status)?;

@@ -24,6 +24,7 @@ impl ControlPlaneClient for LocalControlPlaneClient {
         &self,
         worker_id: WorkerId,
         capabilities: &HashSet<String>,
+        _token: &str,
     ) -> Result<(), WorkerError> {
         self.control_plane
             .register_worker(worker_id, capabilities.iter().cloned().collect())

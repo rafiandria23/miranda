@@ -12,7 +12,8 @@ use miranda_engine::{
     task_runner::{TaskOutcome, TaskOutcomeResult},
 };
 use miranda_storage::{
-    error::StorageError, lease_store::LeaseStore, workflow_store::WorkflowStore,
+    error::StorageError, join_token_store::JoinTokenStore, lease_store::LeaseStore,
+    workflow_store::WorkflowStore,
 };
 use miranda_worker::{assignment::TaskAssignment, error::WorkerError};
 use std::{collections::HashMap, sync::Arc};
@@ -34,6 +35,7 @@ pub struct ControlPlane<Q, R, S, D, N, L> {
     dispatch: D,
     notifier: N,
     leases: LeaseManager<L>,
+    join_tokens: Option<Arc<dyn JoinTokenStore>>,
     retry_policy: RetryPolicy,
     lease_ttl: Duration,
     worker_staleness_threshold: Duration,
@@ -63,9 +65,31 @@ where
             dispatch,
             notifier,
             leases,
+            join_tokens: None,
             retry_policy: RetryPolicy::default(),
             lease_ttl: DEFAULT_LEASE_TTL,
             worker_staleness_threshold: DEFAULT_WORKER_STALENESS_THRESHOLD,
+        }
+    }
+
+    pub fn with_join_tokens(mut self, store: Arc<dyn JoinTokenStore>) -> Self {
+        self.join_tokens = Some(store);
+        self
+    }
+
+    pub async fn validate_join_token(&self, token: &str) -> Result<(), ControlPlaneError> {
+        let Some(store) = &self.join_tokens else {
+            return Ok(());
+        };
+
+        let expected = store.get_token().await?;
+
+        match expected {
+            Some(expected) if expected == token => Ok(()),
+
+            _ => Err(ControlPlaneError::InvalidRequest(
+                "invalid join token".to_string(),
+            )),
         }
     }
 
