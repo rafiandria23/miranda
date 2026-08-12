@@ -1354,6 +1354,7 @@ dependencies = [
  "tonic-prost-build",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
