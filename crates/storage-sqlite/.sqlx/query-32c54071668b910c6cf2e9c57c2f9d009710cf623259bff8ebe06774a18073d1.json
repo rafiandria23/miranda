@@ -1,0 +1,74 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT token, execution_id, workflow_task_id, worker_id, expires_at FROM leases WHERE token = ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "token",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "leases",
+            "name": "token"
+          }
+        }
+      },
+      {
+        "name": "execution_id",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "leases",
+            "name": "execution_id"
+          }
+        }
+      },
+      {
+        "name": "workflow_task_id",
+        "ordinal": 2,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "leases",
+            "name": "workflow_task_id"
+          }
+        }
+      },
+      {
+        "name": "worker_id",
+        "ordinal": 3,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "leases",
+            "name": "worker_id"
+          }
+        }
+      },
+      {
+        "name": "expires_at",
+        "ordinal": 4,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "leases",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "32c54071668b910c6cf2e9c57c2f9d009710cf623259bff8ebe06774a18073d1"
+}

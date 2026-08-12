@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM leases WHERE token = ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "2764da8b1d97eceae643d0125ef5e2182b45668624b9a5f7c2491632887c5db5"
+}

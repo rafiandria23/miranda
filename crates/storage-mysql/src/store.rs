@@ -219,7 +219,7 @@ impl RouterStore for MySqlStore {
 
     fn deregister_worker<'a>(
         &'a self,
-        id: miranda_core::id::WorkerId,
+        id: WorkerId,
     ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
         Box::pin(async move {
             let id_str = id.to_string();
@@ -235,7 +235,7 @@ impl RouterStore for MySqlStore {
 
     fn touch_worker<'a>(
         &'a self,
-        id: miranda_core::id::WorkerId,
+        id: WorkerId,
     ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
         Box::pin(async move {
             let id_str = id.to_string();
@@ -257,13 +257,7 @@ impl RouterStore for MySqlStore {
     fn select_worker<'a>(
         &'a self,
         capability: &'a str,
-    ) -> Pin<
-        Box<
-            dyn Future<Output = Result<Option<miranda_core::id::WorkerId>, StorageError>>
-                + Send
-                + 'a,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<Option<WorkerId>, StorageError>> + Send + 'a>> {
         Box::pin(async move {
             let capability_json = serde_json::Value::String(capability.to_owned());
 
@@ -285,7 +279,7 @@ impl RouterStore for MySqlStore {
 
     fn worker_has_capability<'a>(
         &'a self,
-        id: miranda_core::id::WorkerId,
+        id: WorkerId,
         capability: &'a str,
     ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>> {
         Box::pin(async move {
@@ -308,9 +302,7 @@ impl RouterStore for MySqlStore {
     fn reap_stale_workers<'a>(
         &'a self,
         threshold: Duration,
-    ) -> Pin<
-        Box<dyn Future<Output = Result<Vec<miranda_core::id::WorkerId>, StorageError>> + Send + 'a>,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<WorkerId>, StorageError>> + Send + 'a>> {
         Box::pin(async move {
             let cutoff = OffsetDateTime::now_utc() - threshold;
 
