@@ -1,7 +1,6 @@
 use miranda_core::{spec::dto::TaskConfigSpec, workflow::WorkflowTask};
 use std::{process::Stdio, time::Duration};
 use tokio::{io::AsyncReadExt, process::Command};
-use tracing::debug;
 
 use crate::{TaskExecutor, WorkerError};
 
@@ -90,11 +89,11 @@ impl TaskExecutor for ShellExecutor {
         let exit_code = status.code().unwrap_or(-1);
 
         if !stdout.is_empty() {
-            debug!(stdout = %String::from_utf8_lossy(&stdout), "shell task stdout");
+            tracing::debug!(stdout = %String::from_utf8_lossy(&stdout), "shell task stdout");
         }
 
         if !stderr.is_empty() {
-            debug!(stderr = %String::from_utf8_lossy(&stderr), "shell task stderr");
+            tracing::debug!(stderr = %String::from_utf8_lossy(&stderr), "shell task stderr");
         }
 
         let succeeded = exit_code >= 0
