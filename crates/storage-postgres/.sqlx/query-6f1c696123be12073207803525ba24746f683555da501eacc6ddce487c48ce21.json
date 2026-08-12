@@ -1,0 +1,76 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "DELETE FROM leases WHERE expires_at < $1 RETURNING token, execution_id, workflow_task_id, worker_id, expires_at",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "token",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "leases",
+            "name": "token"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "execution_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "leases",
+            "name": "execution_id"
+          }
+        }
+      },
+      {
+        "ordinal": 2,
+        "name": "workflow_task_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "leases",
+            "name": "workflow_task_id"
+          }
+        }
+      },
+      {
+        "ordinal": 3,
+        "name": "worker_id",
+        "type_info": "Uuid",
+        "origin": {
+          "Table": {
+            "table": "leases",
+            "name": "worker_id"
+          }
+        }
+      },
+      {
+        "ordinal": 4,
+        "name": "expires_at",
+        "type_info": "Timestamptz",
+        "origin": {
+          "Table": {
+            "table": "leases",
+            "name": "expires_at"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false,
+      false,
+      false,
+      false
+    ]
+  },
+  "hash": "6f1c696123be12073207803525ba24746f683555da501eacc6ddce487c48ce21"
+}
