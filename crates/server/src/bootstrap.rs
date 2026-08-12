@@ -126,17 +126,17 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
     let token = match args.join_token {
         Some(token) => {
             join_token_store.set_token(&token).await?;
-
             token
         }
 
-        None => {
-            let token = Uuid::new_v4().to_string();
-
-            join_token_store.set_token(&token).await?;
-
-            token
-        }
+        None => match join_token_store.get_token().await? {
+            Some(existing) => existing,
+            None => {
+                let token = Uuid::new_v4().to_string();
+                join_token_store.set_token(&token).await?;
+                token
+            }
+        },
     };
 
     let control_plane = control_plane.with_join_tokens(join_token_store);
@@ -232,17 +232,17 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
     let token = match args.join_token {
         Some(token) => {
             join_token_store.set_token(&token).await?;
-
             token
         }
 
-        None => {
-            let token = Uuid::new_v4().to_string();
-
-            join_token_store.set_token(&token).await?;
-
-            token
-        }
+        None => match join_token_store.get_token().await? {
+            Some(existing) => existing,
+            None => {
+                let token = Uuid::new_v4().to_string();
+                join_token_store.set_token(&token).await?;
+                token
+            }
+        },
     };
 
     let control_plane = control_plane.with_join_tokens(join_token_store);
