@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n                INSERT INTO leadership (id, holder_id, expires_at)\n                VALUES (?, ?, ?)\n                ON DUPLICATE KEY UPDATE\n                    holder_id = IF(expires_at < ?, VALUES(holder_id), holder_id),\n                    expires_at = IF(expires_at < ?, VALUES(expires_at), expires_at)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 5
+    },
+    "nullable": []
+  },
+  "hash": "879f7467be369a4db41e88d0185bc734490ca638cf7c599f707c1046c222ed65"
+}

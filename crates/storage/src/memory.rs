@@ -16,8 +16,9 @@ use time::{Duration, OffsetDateTime};
 use tokio::sync::RwLock;
 
 use crate::{
-    error::StorageError, join_token_store::JoinTokenStore, lease_store::LeaseStore,
-    router_store::RouterStore, task_queue_store::TaskQueueStore, workflow_store::WorkflowStore,
+    error::StorageError, join_token_store::JoinTokenStore, leadership_store::LeadershipStore,
+    lease_store::LeaseStore, router_store::RouterStore, task_queue_store::TaskQueueStore,
+    workflow_store::WorkflowStore,
 };
 
 #[derive(Default, Clone)]
@@ -28,6 +29,7 @@ pub struct InMemoryStore {
     workers: Arc<RwLock<HashMap<WorkerId, WorkerRegistration>>>,
     leases: Arc<RwLock<HashMap<String, Lease>>>,
     join_token: Arc<RwLock<Option<String>>>,
+    leadership: Arc<RwLock<Option<(String, OffsetDateTime)>>>,
 }
 
 impl InMemoryStore {
@@ -385,5 +387,93 @@ impl JoinTokenStore for InMemoryStore {
         &'a self,
     ) -> Pin<Box<dyn Future<Output = Result<Option<String>, StorageError>> + Send + 'a>> {
         Box::pin(async move { Ok(self.join_token.read().await.clone()) })
+    }
+}
+
+// =========================================================================
+// Leadership Store Implementation
+// =========================================================================
+
+impl LeadershipStore for InMemoryStore {
+    fn try_acquire<'a>(
+        &'a self,
+        holder_id: &'a str,
+        ttl: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut leadership = self.leadership.write().await;
+
+            let now = OffsetDateTime::now_utc();
+
+            let currently_held = leadership
+                .as_ref()
+                .is_some_and(|(_, expires_at)| *expires_at > now);
+
+            if currently_held {
+                return Ok(false);
+            }
+
+            *leadership = Some((holder_id.to_owned(), now + ttl));
+
+            Ok(true)
+        })
+    }
+
+    fn renew<'a>(
+        &'a self,
+        holder_id: &'a str,
+        ttl: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut leadership = self.leadership.write().await;
+
+            let now = OffsetDateTime::now_utc();
+
+            let is_current_holder = leadership
+                .as_ref()
+                .is_some_and(|(holder, expires_at)| holder == holder_id && *expires_at > now);
+
+            if !is_current_holder {
+                return Ok(false);
+            }
+
+            *leadership = Some((holder_id.to_owned(), now + ttl));
+
+            Ok(true)
+        })
+    }
+
+    fn release<'a>(
+        &'a self,
+        holder_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut leadership = self.leadership.write().await;
+
+            let is_current_holder = leadership
+                .as_ref()
+                .is_some_and(|(holder, _)| holder == holder_id);
+
+            if is_current_holder {
+                *leadership = None;
+            }
+
+            Ok(())
+        })
+    }
+
+    fn current_holder<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let leadership = self.leadership.read().await;
+
+            let now = OffsetDateTime::now_utc();
+
+            Ok(leadership
+                .as_ref()
+                .filter(|(_, expires_at)| *expires_at > now)
+                .map(|(holder, _)| holder.clone()))
+        })
     }
 }

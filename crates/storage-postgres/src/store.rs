@@ -7,8 +7,9 @@ use miranda_core::{
     workflow::WorkflowDefinition,
 };
 use miranda_storage::{
-    error::StorageError, join_token_store::JoinTokenStore, lease_store::LeaseStore,
-    router_store::RouterStore, task_queue_store::TaskQueueStore, workflow_store::WorkflowStore,
+    error::StorageError, join_token_store::JoinTokenStore, leadership_store::LeadershipStore,
+    lease_store::LeaseStore, router_store::RouterStore, task_queue_store::TaskQueueStore,
+    workflow_store::WorkflowStore,
 };
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::{future::Future, pin::Pin};
@@ -713,6 +714,110 @@ impl JoinTokenStore for PostgresStore {
                 .map_err(|e| StorageError::Backend(e.to_string()))?;
 
             Ok(row.map(|r| r.token))
+        })
+    }
+}
+
+// =========================================================================
+// Leadership Store Implementation
+// =========================================================================
+
+const LEADERSHIP_ROW_ID: &str = "control-plane";
+
+impl LeadershipStore for PostgresStore {
+    fn try_acquire<'a>(
+        &'a self,
+        holder_id: &'a str,
+        ttl: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let expires_at = OffsetDateTime::now_utc() + ttl;
+            let now = OffsetDateTime::now_utc();
+
+            let row = sqlx::query!(
+                r#"
+                INSERT INTO leadership (id, holder_id, expires_at)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (id) DO UPDATE
+                SET holder_id = $2, expires_at = $3
+                WHERE leadership.expires_at < $4
+                RETURNING holder_id
+                "#,
+                LEADERSHIP_ROW_ID,
+                holder_id,
+                expires_at,
+                now,
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(row.is_some())
+        })
+    }
+
+    fn renew<'a>(
+        &'a self,
+        holder_id: &'a str,
+        ttl: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let expires_at = OffsetDateTime::now_utc() + ttl;
+            let now = OffsetDateTime::now_utc();
+
+            let result = sqlx::query!(
+                r#"
+                UPDATE leadership
+                SET expires_at = $1
+                WHERE id = $2 AND holder_id = $3 AND expires_at > $4
+                "#,
+                expires_at,
+                LEADERSHIP_ROW_ID,
+                holder_id,
+                now,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(result.rows_affected() > 0)
+        })
+    }
+
+    fn release<'a>(
+        &'a self,
+        holder_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(
+                r#"DELETE FROM leadership WHERE id = $1 AND holder_id = $2"#,
+                LEADERSHIP_ROW_ID,
+                holder_id,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn current_holder<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let now = OffsetDateTime::now_utc();
+
+            let row = sqlx::query!(
+                r#"SELECT holder_id FROM leadership WHERE id = $1 AND expires_at > $2"#,
+                LEADERSHIP_ROW_ID,
+                now,
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(row.map(|r| r.holder_id))
         })
     }
 }

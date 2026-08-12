@@ -1,6 +1,7 @@
 pub mod error;
 pub mod filesystem;
 pub mod join_token_store;
+pub mod leadership_store;
 pub mod lease_store;
 pub mod memory;
 pub mod router_store;
@@ -11,6 +12,7 @@ pub mod workflow_store;
 pub use error::StorageError;
 pub use filesystem::FilesystemStore;
 pub use join_token_store::JoinTokenStore;
+pub use leadership_store::LeadershipStore;
 pub use lease_store::LeaseStore;
 pub use memory::InMemoryStore;
 pub use router_store::RouterStore;

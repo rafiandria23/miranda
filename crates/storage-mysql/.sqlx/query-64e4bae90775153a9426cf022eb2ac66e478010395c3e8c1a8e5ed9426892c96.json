@@ -1,0 +1,31 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT holder_id FROM leadership WHERE id = ? AND expires_at > ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "holder_id",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "collation": 255,
+          "max_size": 1020
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.leadership",
+            "name": "holder_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "64e4bae90775153a9426cf022eb2ac66e478010395c3e8c1a8e5ed9426892c96"
+}

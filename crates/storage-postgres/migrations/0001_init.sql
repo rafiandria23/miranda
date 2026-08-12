@@ -57,3 +57,9 @@ CREATE TABLE IF NOT EXISTS join_tokens (
   token TEXT PRIMARY KEY,
   created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+CREATE TABLE IF NOT EXISTS leadership (
+  id TEXT PRIMARY KEY,
+  holder_id TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL
+);

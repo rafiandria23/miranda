@@ -6,8 +6,9 @@ use miranda_core::{
     workflow::WorkflowDefinition,
 };
 use miranda_storage::{
-    error::StorageError, join_token_store::JoinTokenStore, lease_store::LeaseStore,
-    router_store::RouterStore, task_queue_store::TaskQueueStore, workflow_store::WorkflowStore,
+    error::StorageError, join_token_store::JoinTokenStore, leadership_store::LeadershipStore,
+    lease_store::LeaseStore, router_store::RouterStore, task_queue_store::TaskQueueStore,
+    workflow_store::WorkflowStore,
 };
 use sqlx::mysql::{MySqlPool, MySqlPoolOptions};
 use std::{future::Future, pin::Pin};
@@ -788,6 +789,120 @@ impl JoinTokenStore for MySqlStore {
                 .map_err(|e| StorageError::Backend(e.to_string()))?;
 
             Ok(row.map(|r| r.token))
+        })
+    }
+}
+
+// =========================================================================
+// Leadership Store Implementation
+// =========================================================================
+
+const LEADERSHIP_ROW_ID: &str = "control-plane";
+
+impl LeadershipStore for MySqlStore {
+    fn try_acquire<'a>(
+        &'a self,
+        holder_id: &'a str,
+        ttl: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let expires_at = OffsetDateTime::now_utc() + ttl;
+            let now = OffsetDateTime::now_utc();
+
+            let result = sqlx::query!(
+                r#"
+                INSERT INTO leadership (id, holder_id, expires_at)
+                VALUES (?, ?, ?)
+                ON DUPLICATE KEY UPDATE
+                    holder_id = IF(expires_at < ?, VALUES(holder_id), holder_id),
+                    expires_at = IF(expires_at < ?, VALUES(expires_at), expires_at)
+                "#,
+                LEADERSHIP_ROW_ID,
+                holder_id,
+                expires_at,
+                now,
+                now,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            let _ = result;
+
+            let row = sqlx::query!(
+                r#"SELECT holder_id FROM leadership WHERE id = ?"#,
+                LEADERSHIP_ROW_ID,
+            )
+            .fetch_one(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(row.holder_id == holder_id)
+        })
+    }
+
+    fn renew<'a>(
+        &'a self,
+        holder_id: &'a str,
+        ttl: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let expires_at = OffsetDateTime::now_utc() + ttl;
+            let now = OffsetDateTime::now_utc();
+
+            let result = sqlx::query!(
+                r#"
+                UPDATE leadership
+                SET expires_at = ?
+                WHERE id = ? AND holder_id = ? AND expires_at > ?
+                "#,
+                expires_at,
+                LEADERSHIP_ROW_ID,
+                holder_id,
+                now,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(result.rows_affected() > 0)
+        })
+    }
+
+    fn release<'a>(
+        &'a self,
+        holder_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(
+                r#"DELETE FROM leadership WHERE id = ? AND holder_id = ?"#,
+                LEADERSHIP_ROW_ID,
+                holder_id,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn current_holder<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let now = OffsetDateTime::now_utc();
+
+            let row = sqlx::query!(
+                r#"SELECT holder_id FROM leadership WHERE id = ? AND expires_at > ?"#,
+                LEADERSHIP_ROW_ID,
+                now,
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(row.map(|r| r.holder_id))
         })
     }
 }
