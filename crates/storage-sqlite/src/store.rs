@@ -7,8 +7,8 @@ use miranda_core::{
     workflow::WorkflowDefinition,
 };
 use miranda_storage::{
-    error::StorageError, lease_store::LeaseStore, router_store::RouterStore,
-    task_queue_store::TaskQueueStore, workflow_store::WorkflowStore,
+    error::StorageError, join_token_store::JoinTokenStore, lease_store::LeaseStore,
+    router_store::RouterStore, task_queue_store::TaskQueueStore, workflow_store::WorkflowStore,
 };
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
 use std::{future::Future, pin::Pin};
@@ -726,6 +726,58 @@ impl LeaseStore for SqliteStore {
         })
     }
 }
+
+// =========================================================================
+// Join Token Store Implementation
+// =========================================================================
+
+impl JoinTokenStore for SqliteStore {
+    fn set_token<'a>(
+        &'a self,
+        token: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut tx = self
+                .pool
+                .begin()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            sqlx::query!(r#"DELETE FROM join_tokens"#)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            sqlx::query!(r#"INSERT INTO join_tokens (token) VALUES (?1)"#, token)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            tx.commit()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn get_token<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let row = sqlx::query!(r#"SELECT token FROM join_tokens LIMIT 1"#)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(row.map(|r| r.token))
+        })
+    }
+}
+
+// =========================================================================
+// Testing
+// =========================================================================
 
 #[cfg(test)]
 mod tests {

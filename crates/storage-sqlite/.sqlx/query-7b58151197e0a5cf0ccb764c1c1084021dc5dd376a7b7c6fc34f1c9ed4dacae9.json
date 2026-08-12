@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "INSERT INTO join_tokens (token) VALUES (?1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "7b58151197e0a5cf0ccb764c1c1084021dc5dd376a7b7c6fc34f1c9ed4dacae9"
+}

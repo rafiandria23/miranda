@@ -16,8 +16,8 @@ use time::{Duration, OffsetDateTime};
 use tokio::sync::RwLock;
 
 use crate::{
-    error::StorageError, lease_store::LeaseStore, router_store::RouterStore,
-    task_queue_store::TaskQueueStore, workflow_store::WorkflowStore,
+    error::StorageError, join_token_store::JoinTokenStore, lease_store::LeaseStore,
+    router_store::RouterStore, task_queue_store::TaskQueueStore, workflow_store::WorkflowStore,
 };
 
 #[derive(Default, Clone)]
@@ -27,6 +27,7 @@ pub struct InMemoryStore {
     queue: Arc<RwLock<VecDeque<QueuedTask>>>,
     workers: Arc<RwLock<HashMap<WorkerId, WorkerRegistration>>>,
     leases: Arc<RwLock<HashMap<String, Lease>>>,
+    join_token: Arc<RwLock<Option<String>>>,
 }
 
 impl InMemoryStore {
@@ -361,5 +362,28 @@ impl LeaseStore for InMemoryStore {
                 .filter_map(|token| leases.remove(&token))
                 .collect())
         })
+    }
+}
+
+// =========================================================================
+// Join Token Store Implementation
+// =========================================================================
+
+impl JoinTokenStore for InMemoryStore {
+    fn set_token<'a>(
+        &'a self,
+        token: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            *self.join_token.write().await = Some(token.to_owned());
+
+            Ok(())
+        })
+    }
+
+    fn get_token<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move { Ok(self.join_token.read().await.clone()) })
     }
 }

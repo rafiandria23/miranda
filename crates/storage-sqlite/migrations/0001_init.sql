@@ -48,3 +48,8 @@ CREATE TABLE IF NOT EXISTS leases (
 );
 
 CREATE INDEX IF NOT EXISTS idx_leases_worker_id ON leases (worker_id);
+
+CREATE TABLE IF NOT EXISTS join_tokens (
+    token TEXT PRIMARY KEY NOT NULL,
+    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+);

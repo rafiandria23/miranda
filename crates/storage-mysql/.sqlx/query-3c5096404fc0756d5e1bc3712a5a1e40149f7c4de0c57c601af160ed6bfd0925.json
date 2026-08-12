@@ -1,0 +1,31 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT token FROM join_tokens LIMIT 1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "token",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | PRIMARY_KEY | NO_DEFAULT_VALUE",
+          "collation": 255,
+          "max_size": 1020
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.join_tokens",
+            "name": "token"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 0
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "3c5096404fc0756d5e1bc3712a5a1e40149f7c4de0c57c601af160ed6bfd0925"
+}
