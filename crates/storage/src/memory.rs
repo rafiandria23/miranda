@@ -1,6 +1,7 @@
 use miranda_core::{
     execution::Execution,
     id::{ExecutionId, WorkerId, WorkflowId, WorkflowVersionId},
+    lease::Lease,
     queue::QueuedTask,
     router::WorkerRegistration,
     workflow::WorkflowDefinition,
@@ -15,8 +16,8 @@ use time::{Duration, OffsetDateTime};
 use tokio::sync::RwLock;
 
 use crate::{
-    error::StorageError, router_store::RouterStore, task_queue_store::TaskQueueStore,
-    workflow_store::WorkflowStore,
+    error::StorageError, lease_store::LeaseStore, router_store::RouterStore,
+    task_queue_store::TaskQueueStore, workflow_store::WorkflowStore,
 };
 
 #[derive(Default, Clone)]
@@ -25,6 +26,7 @@ pub struct InMemoryStore {
     executions: Arc<RwLock<HashMap<ExecutionId, (Execution, u64)>>>,
     queue: Arc<RwLock<VecDeque<QueuedTask>>>,
     workers: Arc<RwLock<HashMap<WorkerId, WorkerRegistration>>>,
+    leases: Arc<RwLock<HashMap<String, Lease>>>,
 }
 
 impl InMemoryStore {
@@ -274,6 +276,90 @@ impl WorkflowStore for InMemoryStore {
                 .collect();
 
             Ok(active_executions)
+        })
+    }
+}
+
+// =========================================================================
+// Lease Store Implementation
+// =========================================================================
+
+impl LeaseStore for InMemoryStore {
+    fn create<'a>(
+        &'a self,
+        lease: Lease,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.leases.write().await.insert(lease.token.clone(), lease);
+
+            Ok(())
+        })
+    }
+
+    fn get<'a>(
+        &'a self,
+        token: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Lease>, StorageError>> + Send + 'a>> {
+        Box::pin(async move { Ok(self.leases.read().await.get(token).cloned()) })
+    }
+
+    fn renew<'a>(
+        &'a self,
+        token: &'a str,
+        new_expires_at: OffsetDateTime,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            if let Some(lease) = self.leases.write().await.get_mut(token) {
+                lease.expires_at = new_expires_at;
+            }
+
+            Ok(())
+        })
+    }
+
+    fn release<'a>(
+        &'a self,
+        token: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.leases.write().await.remove(token);
+
+            Ok(())
+        })
+    }
+
+    fn active_for_worker<'a>(
+        &'a self,
+        worker_id: WorkerId,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            Ok(self
+                .leases
+                .read()
+                .await
+                .values()
+                .filter(|l| l.worker_id == worker_id && !l.is_expired())
+                .map(|l| l.token.clone())
+                .collect())
+        })
+    }
+
+    fn reap_expired<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Lease>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut leases = self.leases.write().await;
+
+            let expired_tokens: Vec<String> = leases
+                .values()
+                .filter(|l| l.is_expired())
+                .map(|l| l.token.clone())
+                .collect();
+
+            Ok(expired_tokens
+                .into_iter()
+                .filter_map(|token| leases.remove(&token))
+                .collect())
         })
     }
 }
