@@ -11,7 +11,9 @@ use miranda_engine::{
     retry::RetryPolicy,
     task_runner::{TaskOutcome, TaskOutcomeResult},
 };
-use miranda_storage::{error::StorageError, workflow_store::WorkflowStore};
+use miranda_storage::{
+    error::StorageError, lease_store::LeaseStore, workflow_store::WorkflowStore,
+};
 use miranda_worker::{assignment::TaskAssignment, error::WorkerError};
 use std::{collections::HashMap, sync::Arc};
 use time::{Duration, OffsetDateTime};
@@ -19,40 +21,48 @@ use time::{Duration, OffsetDateTime};
 use crate::{
     dispatcher::DispatchStrategy,
     error::ControlPlaneError,
-    lease_manager::{DEFAULT_LEASE_TTL, LeaseManager, LeaseToken},
+    lease_manager::{DEFAULT_LEASE_TTL, LeaseManager},
     notifier::TaskNotifier,
     queue::TaskQueue,
     router::{DEFAULT_WORKER_STALENESS_THRESHOLD, Router},
 };
 
-pub struct ControlPlane<Q, R, S, D, N> {
+pub struct ControlPlane<Q, R, S, D, N, L> {
     queue: Q,
     router: R,
     store: S,
     dispatch: D,
     notifier: N,
-    leases: LeaseManager,
+    leases: LeaseManager<L>,
     retry_policy: RetryPolicy,
     lease_ttl: Duration,
     worker_staleness_threshold: Duration,
 }
 
-impl<Q, R, S, D, N> ControlPlane<Q, R, S, D, N>
+impl<Q, R, S, D, N, L> ControlPlane<Q, R, S, D, N, L>
 where
     Q: TaskQueue,
     R: Router,
     S: WorkflowStore,
     D: DispatchStrategy,
     N: TaskNotifier,
+    L: LeaseStore,
 {
-    pub fn new(queue: Q, router: R, store: S, dispatch: D, notifier: N) -> Self {
+    pub fn new(
+        queue: Q,
+        router: R,
+        store: S,
+        dispatch: D,
+        notifier: N,
+        leases: LeaseManager<L>,
+    ) -> Self {
         Self {
             queue,
             router,
             store,
             dispatch,
             notifier,
-            leases: LeaseManager::new(),
+            leases,
             retry_policy: RetryPolicy::default(),
             lease_ttl: DEFAULT_LEASE_TTL,
             worker_staleness_threshold: DEFAULT_WORKER_STALENESS_THRESHOLD,
@@ -236,7 +246,7 @@ where
                     worker_id,
                     self.lease_ttl,
                 )
-                .await;
+                .await?;
 
             let workflow_task = definition
                 .task(task.workflow_task_id())
@@ -246,7 +256,7 @@ where
             let timeout = definition.effective_timeout(&workflow_task);
 
             return Ok(Some(TaskAssignment {
-                lease_token: lease_token.0,
+                lease_token,
                 task: workflow_task,
                 timeout,
             }));
@@ -259,8 +269,7 @@ where
         lease_token: String,
         result: Result<(), WorkerError>,
     ) -> Result<(), ControlPlaneError> {
-        let token = LeaseToken(lease_token);
-        let lease = self.leases.validate(&token, worker_id).await?;
+        let lease = self.leases.validate(&lease_token, worker_id).await?;
 
         const MAX_RETRIES: u32 = 6;
 
@@ -301,18 +310,18 @@ where
                 Ok(()) => {
                     match outcome_result {
                         Ok(TaskOutcomeResult::Completed) => {
-                            self.leases.release(&token).await?;
+                            self.leases.release(&lease.token).await?;
                         }
 
                         Ok(TaskOutcomeResult::Retried) => {
-                            self.leases.release(&token).await?;
+                            self.leases.release(&lease.token).await?;
 
                             let task = QueuedTask::new(lease.execution_id, lease.workflow_task_id);
                             self.queue.enqueue(task, definition).await?;
                         }
 
                         Err(EngineError::ExecutionFailed(_)) => {
-                            self.leases.release(&token).await?;
+                            self.leases.release(&lease.token).await?;
                         }
 
                         Err(other) => {
@@ -346,9 +355,8 @@ where
     ) -> Result<(), ControlPlaneError> {
         self.router.touch(worker_id).await?;
 
-        for token_str in active_leases {
-            let token = LeaseToken(token_str.clone());
-            let _ = self.leases.renew(&token).await;
+        for token in active_leases {
+            let _ = self.leases.renew(token, self.lease_ttl).await;
         }
 
         Ok(())

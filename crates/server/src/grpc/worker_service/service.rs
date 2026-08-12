@@ -3,7 +3,7 @@ use miranda_control_plane::{
     queue::TaskQueue, router::Router,
 };
 use miranda_core::{id::WorkerId, workflow::WorkflowTask};
-use miranda_storage::workflow_store::WorkflowStore;
+use miranda_storage::{lease_store::LeaseStore, workflow_store::WorkflowStore};
 use miranda_worker::error::WorkerError;
 use std::{net::SocketAddr, pin::Pin, sync::Arc};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
@@ -26,14 +26,14 @@ use proto::{
 
 use super::super::error::to_status;
 
-pub struct WorkerServiceImpl<Q, R, S, D, N> {
-    control_plane: Arc<ControlPlane<Q, R, S, D, N>>,
+pub struct WorkerServiceImpl<Q, R, S, D, N, L> {
+    control_plane: Arc<ControlPlane<Q, R, S, D, N, L>>,
     notifier: GrpcTaskNotifier,
 }
 
-impl<Q, R, S, D, N> WorkerServiceImpl<Q, R, S, D, N> {
+impl<Q, R, S, D, N, L> WorkerServiceImpl<Q, R, S, D, N, L> {
     pub fn new(
-        control_plane: Arc<ControlPlane<Q, R, S, D, N>>,
+        control_plane: Arc<ControlPlane<Q, R, S, D, N, L>>,
         notifier: GrpcTaskNotifier,
     ) -> Self {
         Self {
@@ -44,13 +44,14 @@ impl<Q, R, S, D, N> WorkerServiceImpl<Q, R, S, D, N> {
 }
 
 #[tonic::async_trait]
-impl<Q, R, S, D, N> WorkerService for WorkerServiceImpl<Q, R, S, D, N>
+impl<Q, R, S, D, N, L> WorkerService for WorkerServiceImpl<Q, R, S, D, N, L>
 where
     Q: TaskQueue + 'static,
     R: Router + 'static,
     S: WorkflowStore + 'static,
     D: DispatchStrategy + 'static,
     N: TaskNotifier + 'static,
+    L: LeaseStore + 'static,
 {
     async fn register(
         &self,
@@ -157,8 +158,8 @@ where
     }
 }
 
-pub async fn serve<Q, R, S, D, N>(
-    control_plane: Arc<ControlPlane<Q, R, S, D, N>>,
+pub async fn serve<Q, R, S, D, N, L>(
+    control_plane: Arc<ControlPlane<Q, R, S, D, N, L>>,
     notifier: GrpcTaskNotifier,
     addr: SocketAddr,
 ) -> Result<(), tonic::transport::Error>
@@ -168,6 +169,7 @@ where
     S: WorkflowStore + 'static,
     D: DispatchStrategy + 'static,
     N: TaskNotifier + 'static,
+    L: LeaseStore + 'static,
 {
     let service = WorkerServiceImpl::new(control_plane, notifier);
 

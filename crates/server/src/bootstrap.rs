@@ -1,11 +1,12 @@
 use miranda_control_plane::{
     control_plane::ControlPlane,
     dispatcher::{DispatchStrategy, Dispatcher},
+    lease_manager::LeaseManager,
     notifier::TaskNotifier,
     queue::{DurableTaskQueue, TaskQueue},
     router::{DurableRouter, Router},
 };
-use miranda_storage::workflow_store::WorkflowStore;
+use miranda_storage::{lease_store::LeaseStore, workflow_store::WorkflowStore};
 use miranda_storage_mysql::{config::MySqlConfig, store::MySqlStore};
 use miranda_storage_postgres::{config::PostgresConfig, store::PostgresStore};
 use miranda_storage_sqlite::{config::SqliteConfig, store::SqliteStore};
@@ -29,6 +30,7 @@ pub type ServerControlPlane = ControlPlane<
     Arc<dyn WorkflowStore>,
     Dispatcher<Arc<dyn TaskQueue>>,
     Arc<dyn TaskNotifier>,
+    Arc<dyn LeaseStore>,
 >;
 
 async fn build_control_plane(
@@ -37,6 +39,7 @@ async fn build_control_plane(
     let store: Arc<dyn WorkflowStore>;
     let queue: Arc<dyn TaskQueue>;
     let router: Arc<dyn Router>;
+    let lease_store: Arc<dyn LeaseStore>;
 
     let grpc_notifier = GrpcTaskNotifier::new();
     let notifier: Arc<dyn TaskNotifier> = Arc::new(grpc_notifier.clone());
@@ -45,30 +48,34 @@ async fn build_control_plane(
         let backend = Arc::new(MySqlStore::connect(MySqlConfig::new(database_url)).await?);
         queue = Arc::new(DurableTaskQueue::new(backend.clone()));
         router = Arc::new(DurableRouter::new(backend.clone()));
+        lease_store = backend.clone();
         store = backend;
     } else if database_url.starts_with("postgres://") || database_url.starts_with("postgresql://") {
         let backend = Arc::new(PostgresStore::connect(PostgresConfig::new(database_url)).await?);
         queue = Arc::new(DurableTaskQueue::new(backend.clone()));
         router = Arc::new(DurableRouter::new(backend.clone()));
+        lease_store = backend.clone();
         store = backend;
     } else if let Some(path) = database_url.strip_prefix("sqlite://") {
         let backend = Arc::new(SqliteStore::connect(SqliteConfig::new(path)).await?);
         queue = Arc::new(DurableTaskQueue::new(backend.clone()));
         router = Arc::new(DurableRouter::new(backend.clone()));
+        lease_store = backend.clone();
         store = backend;
     } else {
         return Err(format!("unsupported database URL scheme: {database_url}").into());
     };
 
     let dispatch = Dispatcher::new(queue.clone());
+    let leases = LeaseManager::new(lease_store);
 
-    let control_plane = ControlPlane::new(queue, router, store, dispatch, notifier);
+    let control_plane = ControlPlane::new(queue, router, store, dispatch, notifier, leases);
 
     Ok((control_plane, grpc_notifier))
 }
 
-async fn run_reaper<Q, R, S, D, N>(
-    control_plane: Arc<ControlPlane<Q, R, S, D, N>>,
+async fn run_reaper<Q, R, S, D, N, L>(
+    control_plane: Arc<ControlPlane<Q, R, S, D, N, L>>,
     period: Duration,
 ) where
     Q: TaskQueue,
@@ -76,6 +83,7 @@ async fn run_reaper<Q, R, S, D, N>(
     S: WorkflowStore,
     D: DispatchStrategy,
     N: TaskNotifier,
+    L: LeaseStore,
 {
     let mut ticker = tokio::time::interval(period);
 
