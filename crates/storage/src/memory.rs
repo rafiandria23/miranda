@@ -16,8 +16,13 @@ use time::{Duration, OffsetDateTime};
 use tokio::sync::RwLock;
 
 use crate::{
-    error::StorageError, join_token_store::JoinTokenStore, leadership_store::LeadershipStore,
-    lease_store::LeaseStore, router_store::RouterStore, task_queue_store::TaskQueueStore,
+    error::StorageError,
+    join_token_store::JoinTokenStore,
+    leadership_store::LeadershipStore,
+    lease_store::LeaseStore,
+    peer_store::{PeerInfo, PeerStore},
+    router_store::RouterStore,
+    task_queue_store::TaskQueueStore,
     workflow_store::WorkflowStore,
 };
 
@@ -30,6 +35,7 @@ pub struct InMemoryStore {
     leases: Arc<RwLock<HashMap<String, Lease>>>,
     join_token: Arc<RwLock<Option<String>>>,
     leadership: Arc<RwLock<Option<(String, OffsetDateTime)>>>,
+    peers: Arc<RwLock<HashMap<String, (String, OffsetDateTime)>>>,
 }
 
 impl InMemoryStore {
@@ -474,6 +480,72 @@ impl LeadershipStore for InMemoryStore {
                 .as_ref()
                 .filter(|(_, expires_at)| *expires_at > now)
                 .map(|(holder, _)| holder.clone()))
+        })
+    }
+}
+
+// =========================================================================
+// Peer Store Implementation
+// =========================================================================
+
+impl PeerStore for InMemoryStore {
+    fn register<'a>(
+        &'a self,
+        id: &'a str,
+        grpc_address: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.peers.write().await.insert(
+                id.to_owned(),
+                (grpc_address.to_owned(), OffsetDateTime::now_utc()),
+            );
+
+            Ok(())
+        })
+    }
+
+    fn touch<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            if let Some(entry) = self.peers.write().await.get_mut(id) {
+                entry.1 = OffsetDateTime::now_utc();
+            }
+
+            Ok(())
+        })
+    }
+
+    fn deregister<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.peers.write().await.remove(id);
+
+            Ok(())
+        })
+    }
+
+    fn list_active<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<PeerInfo>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let now = OffsetDateTime::now_utc();
+
+            Ok(self
+                .peers
+                .read()
+                .await
+                .iter()
+                .filter(|(_, (_, last_heartbeat))| now - *last_heartbeat < threshold)
+                .map(|(id, (grpc_address, _))| PeerInfo {
+                    id: id.clone(),
+                    grpc_address: grpc_address.clone(),
+                })
+                .collect())
         })
     }
 }

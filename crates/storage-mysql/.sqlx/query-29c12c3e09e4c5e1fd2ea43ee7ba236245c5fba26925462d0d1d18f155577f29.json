@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n                INSERT INTO control_plane_instances (id, grpc_address, last_heartbeat)\n                VALUES (?, ?, ?)\n                ON DUPLICATE KEY UPDATE grpc_address = VALUES(grpc_address), last_heartbeat = VALUES(last_heartbeat)\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "29c12c3e09e4c5e1fd2ea43ee7ba236245c5fba26925462d0d1d18f155577f29"
+}

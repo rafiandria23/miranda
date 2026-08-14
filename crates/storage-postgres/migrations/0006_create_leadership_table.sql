@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS leadership (
+  id TEXT PRIMARY KEY,
+  holder_id TEXT NOT NULL,
+  expires_at TIMESTAMPTZ NOT NULL
+);

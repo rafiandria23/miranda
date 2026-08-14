@@ -7,8 +7,13 @@ use miranda_core::{
     workflow::WorkflowDefinition,
 };
 use miranda_storage::{
-    error::StorageError, join_token_store::JoinTokenStore, leadership_store::LeadershipStore,
-    lease_store::LeaseStore, router_store::RouterStore, task_queue_store::TaskQueueStore,
+    error::StorageError,
+    join_token_store::JoinTokenStore,
+    leadership_store::LeadershipStore,
+    lease_store::LeaseStore,
+    peer_store::{PeerInfo, PeerStore},
+    router_store::RouterStore,
+    task_queue_store::TaskQueueStore,
     workflow_store::WorkflowStore,
 };
 use sqlx::postgres::{PgPool, PgPoolOptions};
@@ -818,6 +823,92 @@ impl LeadershipStore for PostgresStore {
             .map_err(|e| StorageError::Backend(e.to_string()))?;
 
             Ok(row.map(|r| r.holder_id))
+        })
+    }
+}
+
+// =========================================================================
+// Peer Store Implementation
+// =========================================================================
+
+impl PeerStore for PostgresStore {
+    fn register<'a>(
+        &'a self,
+        id: &'a str,
+        grpc_address: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(
+                r#"
+                INSERT INTO control_plane_instances (id, grpc_address, last_heartbeat)
+                VALUES ($1, $2, now())
+                ON CONFLICT (id) DO UPDATE
+                SET grpc_address = $2, last_heartbeat = now()
+                "#,
+                id,
+                grpc_address,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn touch<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(
+                r#"UPDATE control_plane_instances SET last_heartbeat = now() WHERE id = $1"#,
+                id,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn deregister<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(r#"DELETE FROM control_plane_instances WHERE id = $1"#, id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn list_active<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<PeerInfo>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let cutoff = OffsetDateTime::now_utc() - threshold;
+
+            let rows = sqlx::query!(
+                r#"SELECT id, grpc_address FROM control_plane_instances WHERE last_heartbeat > $1"#,
+                cutoff,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(rows
+                .into_iter()
+                .map(|r| PeerInfo {
+                    id: r.id,
+                    grpc_address: r.grpc_address,
+                })
+                .collect())
         })
     }
 }

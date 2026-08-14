@@ -1,0 +1,38 @@
+{
+  "db_name": "SQLite",
+  "query": "SELECT id, grpc_address FROM control_plane_instances WHERE last_heartbeat > ?1",
+  "describe": {
+    "columns": [
+      {
+        "name": "id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "control_plane_instances",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "name": "grpc_address",
+        "ordinal": 1,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "control_plane_instances",
+            "name": "grpc_address"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "2bda5918b5ab4f142290a1ce72d93ded65f7ed087eccd585f7622a173e783350"
+}

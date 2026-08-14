@@ -1,0 +1,15 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO control_plane_instances (id, grpc_address, last_heartbeat)\n                VALUES ($1, $2, now())\n                ON CONFLICT (id) DO UPDATE\n                SET grpc_address = $2, last_heartbeat = now()\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "294e56f22e3892bee721c92000dc6806e9e7eeb45702b1b85217167e8052270f"
+}

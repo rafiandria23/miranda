@@ -1,3 +1,10 @@
 syntax = "proto3";
 
 package miranda.control_plane.v1;
+
+service ControlPlaneService {
+  rpc NotifyReady(NotifyReadyRequest) returns (NotifyReadyResponse);
+}
+
+message NotifyReadyRequest {}
+message NotifyReadyResponse {}

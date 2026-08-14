@@ -7,8 +7,13 @@ use miranda_core::{
     workflow::WorkflowDefinition,
 };
 use miranda_storage::{
-    error::StorageError, join_token_store::JoinTokenStore, leadership_store::LeadershipStore,
-    lease_store::LeaseStore, router_store::RouterStore, task_queue_store::TaskQueueStore,
+    error::StorageError,
+    join_token_store::JoinTokenStore,
+    leadership_store::LeadershipStore,
+    lease_store::LeaseStore,
+    peer_store::{PeerInfo, PeerStore},
+    router_store::RouterStore,
+    task_queue_store::TaskQueueStore,
     workflow_store::WorkflowStore,
 };
 use sqlx::{SqlitePool, sqlite::SqlitePoolOptions};
@@ -886,6 +891,104 @@ impl LeadershipStore for SqliteStore {
             .map_err(|e| StorageError::Backend(e.to_string()))?;
 
             Ok(row.map(|r| r.holder_id))
+        })
+    }
+}
+
+// =========================================================================
+// Peer Store Implementation
+// =========================================================================
+
+impl PeerStore for SqliteStore {
+    fn register<'a>(
+        &'a self,
+        id: &'a str,
+        grpc_address: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let now_str = OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
+
+            sqlx::query!(
+                r#"
+                INSERT INTO control_plane_instances (id, grpc_address, last_heartbeat)
+                VALUES (?1, ?2, ?3)
+                ON CONFLICT (id) DO UPDATE
+                SET grpc_address = ?2, last_heartbeat = ?3
+                "#,
+                id,
+                grpc_address,
+                now_str,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn touch<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let now_str = OffsetDateTime::now_utc()
+                .format(&time::format_description::well_known::Rfc3339)
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
+
+            sqlx::query!(
+                r#"UPDATE control_plane_instances SET last_heartbeat = ?1 WHERE id = ?2"#,
+                now_str,
+                id,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn deregister<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(r#"DELETE FROM control_plane_instances WHERE id = ?1"#, id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn list_active<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<PeerInfo>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let cutoff_str = (OffsetDateTime::now_utc() - threshold)
+                .format(&time::format_description::well_known::Rfc3339)
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
+
+            let rows = sqlx::query!(
+                r#"SELECT id, grpc_address FROM control_plane_instances WHERE last_heartbeat > ?1"#,
+                cutoff_str,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(rows
+                .into_iter()
+                .map(|r| PeerInfo {
+                    id: r.id,
+                    grpc_address: r.grpc_address,
+                })
+                .collect())
         })
     }
 }
