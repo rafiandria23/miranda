@@ -911,6 +911,25 @@ impl PeerStore for PostgresStore {
                 .collect())
         })
     }
+
+    fn reap_stale<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let cutoff = OffsetDateTime::now_utc() - threshold;
+
+            let rows = sqlx::query!(
+                r#"DELETE FROM control_plane_instances WHERE last_heartbeat < $1 RETURNING id"#,
+                cutoff,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(rows.into_iter().map(|r| r.id).collect())
+        })
+    }
 }
 
 // =========================================================================

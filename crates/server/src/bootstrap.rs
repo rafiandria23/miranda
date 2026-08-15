@@ -18,7 +18,8 @@ use miranda_worker::{
     executor::DispatchExecutor,
     worker::{Worker, WorkerConfig},
 };
-use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
+use std::{error::Error, net::SocketAddr, sync::Arc};
+use time::Duration;
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
@@ -108,9 +109,10 @@ async fn build_control_plane(
     ))
 }
 
-async fn run_reaper<Q, R, S, D, N, L>(
+async fn run_reaper<Q, R, S, D, N, L, P>(
     control_plane: Arc<ControlPlane<Q, R, S, D, N, L>>,
     leadership: Arc<LeadershipRunner<Arc<dyn LeadershipStore>>>,
+    peer_store: P,
     period: Duration,
 ) where
     Q: TaskQueue,
@@ -119,8 +121,13 @@ async fn run_reaper<Q, R, S, D, N, L>(
     D: DispatchStrategy,
     N: TaskNotifier,
     L: LeaseStore,
+    P: PeerStore,
 {
-    let mut ticker = tokio::time::interval(period);
+    let std_period: std::time::Duration = period
+        .try_into()
+        .expect("reaper period must be non-negative");
+
+    let mut ticker = tokio::time::interval(std_period);
 
     loop {
         ticker.tick().await;
@@ -139,6 +146,12 @@ async fn run_reaper<Q, R, S, D, N, L>(
             Ok(0) => {}
             Ok(n) => tracing::info!(removed = n, "reaped stale workers"),
             Err(e) => tracing::warn!(error = %e, "reap_stale_workers failed"),
+        }
+
+        match peer_store.reap_stale(Duration::seconds(120)).await {
+            Ok(ids) if ids.is_empty() => {}
+            Ok(ids) => tracing::info!(removed = ids.len(), "reaped stale control-plane instances"),
+            Err(e) => tracing::warn!(error = %e, "reap_stale peer instances failed"),
         }
     }
 }
@@ -178,7 +191,10 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
     let grpc_addr = args.grpc_bind.parse()?;
     let http_addr: SocketAddr = args.http_bind.parse()?;
 
-    let peer_manager = Arc::new(PeerManager::new(format!("http://{grpc_addr}"), peer_store));
+    let peer_manager = Arc::new(PeerManager::new(
+        format!("http://{grpc_addr}"),
+        peer_store.clone(),
+    ));
     grpc_notifier.set_peers(peer_manager.clone()).await;
     tokio::spawn({
         let peer_manager = peer_manager.clone();
@@ -193,7 +209,8 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
     tokio::spawn(run_reaper(
         control_plane.clone(),
         leadership,
-        Duration::from_secs(30),
+        peer_store,
+        Duration::seconds(60),
     ));
 
     let grpc_server = crate::grpc::serve_all(control_plane.clone(), grpc_notifier, grpc_addr);
@@ -315,7 +332,10 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
     let grpc_addr = args.grpc_bind.parse()?;
     let http_addr: SocketAddr = args.http_bind.parse()?;
 
-    let peer_manager = Arc::new(PeerManager::new(format!("http://{grpc_addr}"), peer_store));
+    let peer_manager = Arc::new(PeerManager::new(
+        format!("http://{grpc_addr}"),
+        peer_store.clone(),
+    ));
     grpc_notifier.set_peers(peer_manager.clone()).await;
     tokio::spawn({
         let peer_manager = peer_manager.clone();
@@ -334,7 +354,8 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
     tokio::spawn(run_reaper(
         control_plane.clone(),
         leadership,
-        Duration::from_secs(30),
+        peer_store,
+        Duration::seconds(60),
     ));
 
     let grpc_server = crate::grpc::serve_all(control_plane.clone(), grpc_notifier, grpc_addr);

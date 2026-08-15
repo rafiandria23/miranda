@@ -991,6 +991,35 @@ impl PeerStore for SqliteStore {
                 .collect())
         })
     }
+
+    fn reap_stale<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let cutoff_str = (OffsetDateTime::now_utc() - threshold)
+                .format(&time::format_description::well_known::Rfc3339)
+                .map_err(|e| StorageError::Serialization(e.to_string()))?;
+
+            let rows = sqlx::query!(
+                r#"SELECT id FROM control_plane_instances WHERE last_heartbeat < ?1"#,
+                cutoff_str,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            sqlx::query!(
+                r#"DELETE FROM control_plane_instances WHERE last_heartbeat < ?1"#,
+                cutoff_str,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(rows.into_iter().map(|r| r.id).collect())
+        })
+    }
 }
 
 // =========================================================================

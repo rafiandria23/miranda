@@ -548,4 +548,26 @@ impl PeerStore for InMemoryStore {
                 .collect())
         })
     }
+
+    fn reap_stale<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut peers = self.peers.write().await;
+            let now = OffsetDateTime::now_utc();
+
+            let stale_ids: Vec<String> = peers
+                .iter()
+                .filter(|(_, (_, last_heartbeat))| now - *last_heartbeat >= threshold)
+                .map(|(id, _)| id.clone())
+                .collect();
+
+            for id in &stale_ids {
+                peers.remove(id);
+            }
+
+            Ok(stale_ids)
+        })
+    }
 }
