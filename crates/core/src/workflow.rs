@@ -69,12 +69,17 @@ impl Workflow {
         let workflow_version = WorkflowVersion::new(self.id, version, definition)?;
 
         self.versions.push(workflow_version);
+
         Ok(self
             .versions
             .last()
             .expect("workflow version was just added"))
     }
 }
+
+// =========================================================================
+// Testing
+// =========================================================================
 
 #[cfg(test)]
 mod tests {
@@ -95,6 +100,14 @@ mod tests {
 
         assert_eq!(workflow.name(), "onboarding");
         assert!(workflow.versions().is_empty());
+    }
+
+    #[test]
+    fn new_assigns_a_unique_id() {
+        let first = Workflow::new("onboarding".to_owned()).unwrap();
+        let second = Workflow::new("onboarding".to_owned()).unwrap();
+
+        assert_ne!(first.id(), second.id());
     }
 
     #[test]
@@ -135,10 +148,49 @@ mod tests {
     }
 
     #[test]
+    fn add_version_stores_the_given_definition() {
+        let mut workflow = Workflow::new("onboarding".to_owned()).unwrap();
+        let definition = single_task_definition();
+
+        workflow.add_version(definition.clone()).unwrap();
+
+        assert_eq!(workflow.versions()[0].definition(), &definition);
+    }
+
+    #[test]
     fn validate_succeeds_for_well_formed_workflow() {
         let mut workflow = Workflow::new("onboarding".to_owned()).unwrap();
         workflow.add_version(single_task_definition()).unwrap();
 
         assert!(workflow.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_succeeds_for_workflow_without_versions() {
+        let workflow = Workflow::new("onboarding".to_owned()).unwrap();
+
+        assert!(workflow.validate().is_ok());
+    }
+
+    #[test]
+    fn validate_fails_when_name_is_invalid() {
+        let mut workflow = Workflow::new("onboarding".to_owned()).unwrap();
+        workflow.name = "".to_owned();
+
+        assert_eq!(
+            workflow.validate(),
+            Err(ExecutionError::InvalidWorkflowName)
+        );
+    }
+
+    #[test]
+    fn workflow_round_trips_through_json() {
+        let mut workflow = Workflow::new("onboarding".to_owned()).unwrap();
+        workflow.add_version(single_task_definition()).unwrap();
+
+        let json = serde_json::to_string(&workflow).unwrap();
+        let deserialized: Workflow = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(workflow, deserialized);
     }
 }

@@ -95,6 +95,10 @@ impl WorkflowTask {
     }
 }
 
+// =========================================================================
+// Testing
+// =========================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -248,5 +252,51 @@ mod tests {
         let deserialized: WorkflowTask = serde_json::from_str(&json).unwrap();
 
         assert_eq!(deserialized.timeout(), None);
+    }
+
+    #[test]
+    fn new_defaults_config_to_null() {
+        let task =
+            WorkflowTask::new(WorkflowTaskId::new(), "send_email".to_owned(), vec![]).unwrap();
+
+        assert_eq!(task.config(), &serde_json::Value::Null);
+    }
+
+    #[test]
+    fn with_config_sets_the_config() {
+        let config = serde_json::json!({"command": "echo hi"});
+
+        let task = WorkflowTask::new(WorkflowTaskId::new(), "shell".to_owned(), vec![])
+            .unwrap()
+            .with_config(config.clone());
+
+        assert_eq!(task.config(), &config);
+    }
+
+    #[test]
+    fn workflow_task_with_config_round_trips_through_json() {
+        let config = serde_json::json!({"command": "echo hi"});
+        let task = WorkflowTask::new(WorkflowTaskId::new(), "shell".to_owned(), vec![])
+            .unwrap()
+            .with_config(config.clone());
+
+        let json = serde_json::to_string(&task).unwrap();
+        let deserialized: WorkflowTask = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(task, deserialized);
+        assert_eq!(deserialized.config(), &config);
+    }
+
+    #[test]
+    fn workflow_task_deserializes_without_config_field() {
+        let id = WorkflowTaskId::new();
+        let json = format!(
+            r#"{{"id":"{}","task_type":"send_email","dependencies":[]}}"#,
+            id
+        );
+
+        let deserialized: WorkflowTask = serde_json::from_str(&json).unwrap();
+
+        assert_eq!(deserialized.config(), &serde_json::Value::Null);
     }
 }

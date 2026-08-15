@@ -381,6 +381,10 @@ impl Execution {
     }
 }
 
+// =========================================================================
+// Testing
+// =========================================================================
+
 #[cfg(test)]
 mod tests {
     use crate::id::WorkflowTaskId;
@@ -435,7 +439,7 @@ mod tests {
     fn start_transitions_pending_to_running() {
         let mut execution = Execution::new(WorkflowVersionId::new());
 
-        execution.start().unwrap();
+        assert!(execution.start().is_ok());
 
         assert_eq!(execution.status(), ExecutionStatus::Running);
     }
@@ -771,6 +775,20 @@ mod tests {
         execution.apply(event, &definition).unwrap();
 
         assert_eq!(execution.status(), ExecutionStatus::Running);
+    }
+
+    #[test]
+    fn apply_returns_the_applied_event() {
+        let (definition, _task_id) = single_task_definition();
+        let mut execution =
+            Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+
+        let event = Event::new(execution.id(), EventPayload::ExecutionStarted);
+        let event_id = event.id();
+        let returned = execution.apply(event, &definition).unwrap();
+
+        assert_eq!(returned.id(), event_id);
+        assert_eq!(returned.payload(), &EventPayload::ExecutionStarted);
     }
 
     #[test]
