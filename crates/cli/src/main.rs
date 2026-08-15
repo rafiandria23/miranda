@@ -84,3 +84,87 @@ async fn check_status(execution_id: &str, server: &str) -> Result<(), Box<dyn Er
 
     Ok(())
 }
+
+// =========================================================================
+// Testing
+// =========================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn run_workflow_fails_when_the_file_does_not_exist() {
+        let result = run_workflow(Path::new("/nonexistent/workflow.yaml")).await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn register_workflow_fails_when_the_file_does_not_exist() {
+        let result = register_workflow(
+            Path::new("/nonexistent/workflow.yaml"),
+            "http://localhost:1",
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn submit_workflow_fails_when_the_file_does_not_exist() {
+        let result = submit_workflow(
+            Path::new("/nonexistent/workflow.yaml"),
+            "http://localhost:1",
+        )
+        .await;
+
+        assert!(result.is_err());
+    }
+
+    #[tokio::test]
+    async fn check_status_fails_for_an_invalid_execution_id() {
+        let result = check_status("not-a-valid-execution-id", "http://localhost:1").await;
+
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn cli_parses_the_run_command() {
+        let cli = Cli::parse_from(["miranda", "run", "workflow.yaml"]);
+
+        match cli.command {
+            Command::Run { path } => assert_eq!(path, Path::new("workflow.yaml")),
+            other => panic!("expected Command::Run, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_parses_the_status_command() {
+        let cli = Cli::parse_from([
+            "miranda",
+            "status",
+            "exec-123",
+            "--server",
+            "http://localhost:8080",
+        ]);
+
+        match cli.command {
+            Command::Status {
+                execution_id,
+                server,
+            } => {
+                assert_eq!(execution_id, "exec-123");
+                assert_eq!(server, "http://localhost:8080");
+            }
+            other => panic!("expected Command::Status, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn cli_rejects_an_unknown_command() {
+        let result = Cli::try_parse_from(["miranda", "bogus"]);
+
+        assert!(result.is_err());
+    }
+}
