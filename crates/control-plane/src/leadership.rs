@@ -89,3 +89,112 @@ impl<S: LeadershipStore> LeadershipRunner<S> {
         }
     }
 }
+
+// =========================================================================
+// Testing
+// =========================================================================
+
+#[cfg(test)]
+mod tests {
+    use miranda_storage::InMemoryStore;
+
+    use super::*;
+
+    #[test]
+    fn new_generates_a_unique_holder_id_and_starts_as_non_leader() {
+        let runner = LeadershipRunner::new(InMemoryStore::new());
+        let other = LeadershipRunner::new(InMemoryStore::new());
+
+        assert!(!runner.is_leader());
+        assert!(!runner.holder_id().is_empty());
+        assert_ne!(runner.holder_id(), other.holder_id());
+    }
+
+    #[test]
+    fn with_ttl_and_with_renew_interval_override_the_defaults() {
+        let runner = LeadershipRunner::new(InMemoryStore::new())
+            .with_ttl(Duration::seconds(1))
+            .with_renew_interval(Duration::milliseconds(10));
+
+        assert_eq!(runner.ttl, Duration::seconds(1));
+        assert_eq!(runner.renew_interval, Duration::milliseconds(10));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_acquires_leadership_when_none_is_held() {
+        let store = InMemoryStore::new();
+        let runner = Arc::new(
+            LeadershipRunner::new(store)
+                .with_ttl(Duration::seconds(10))
+                .with_renew_interval(Duration::milliseconds(50)),
+        );
+
+        let handle = tokio::spawn({
+            let runner = runner.clone();
+            async move { runner.run().await }
+        });
+
+        tokio::time::advance(std::time::Duration::from_millis(60)).await;
+        tokio::task::yield_now().await;
+
+        assert!(runner.is_leader());
+
+        handle.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_does_not_acquire_leadership_while_another_holder_is_active() {
+        let store = InMemoryStore::new();
+
+        store
+            .try_acquire("other-holder", Duration::seconds(10))
+            .await
+            .expect("other holder acquires leadership");
+
+        let runner = Arc::new(
+            LeadershipRunner::new(store)
+                .with_ttl(Duration::seconds(10))
+                .with_renew_interval(Duration::milliseconds(50)),
+        );
+
+        let handle = tokio::spawn({
+            let runner = runner.clone();
+            async move { runner.run().await }
+        });
+
+        tokio::time::advance(std::time::Duration::from_millis(60)).await;
+        tokio::task::yield_now().await;
+
+        assert!(!runner.is_leader());
+
+        handle.abort();
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn run_loses_leadership_when_the_lease_expires_before_the_next_renewal() {
+        let store = InMemoryStore::new();
+
+        let runner = Arc::new(
+            LeadershipRunner::new(store)
+                .with_ttl(Duration::milliseconds(10))
+                .with_renew_interval(Duration::milliseconds(50)),
+        );
+
+        let handle = tokio::spawn({
+            let runner = runner.clone();
+            async move { runner.run().await }
+        });
+
+        tokio::time::advance(std::time::Duration::from_millis(60)).await;
+        tokio::task::yield_now().await;
+        assert!(runner.is_leader());
+
+        std::thread::sleep(std::time::Duration::from_millis(15));
+
+        tokio::time::advance(std::time::Duration::from_millis(50)).await;
+        tokio::task::yield_now().await;
+        assert!(!runner.is_leader());
+
+        handle.abort();
+    }
+}

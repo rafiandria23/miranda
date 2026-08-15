@@ -119,12 +119,13 @@ pub async fn status(
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use serde_json::json;
     use wiremock::{
         Mock, MockServer, ResponseTemplate,
         matchers::{method, path},
     };
+
+    use super::*;
 
     fn definition() -> WorkflowDefinition {
         WorkflowDefinition::new(vec![]).unwrap()

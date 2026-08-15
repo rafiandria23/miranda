@@ -39,11 +39,12 @@ fn ensure_exists(path: &Path) -> Result<(), ConfigDirError> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
     use std::{
         sync::Mutex,
         time::{SystemTime, UNIX_EPOCH},
     };
+
+    use super::*;
 
     static HOME_ENV_LOCK: Mutex<()> = Mutex::new(());
 
