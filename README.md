@@ -68,20 +68,29 @@ That's it. No server, no database setup. Miranda stores execution state in
 ## Running distributed
 
 Miranda's distributed mode has three roles a process can take on, via two
-independent flags:
+independent flags. Starting a control plane generates (or accepts) a join
+token and prints the exact command to connect a worker to it:
 
 ```bash
 # Control plane only. Coordinates workers, exposes gRPC + HTTP APIs.
+# Prints: join a worker with: miranda-server --worker --control-plane-url ... --join-token ...
 miranda-server --control-plane --database-url postgres://user:pass@localhost/miranda
 
-# Worker only. Connects to a control plane elsewhere.
+# Worker only. Connects to a control plane elsewhere. --join-token is required
+# and is checked by the control plane before the worker is allowed to register.
 miranda-server --worker --control-plane-url http://localhost:7433 \
+  --join-token <token-from-the-control-plane's-startup-output> \
   --capabilities shell,http,wait,noop
 
 # Both, co-located in one process. Worker talks to the control plane
-# in-process, no network hop. The natural shape for a single-node setup.
+# in-process, no network hop, no token needed for that internal link.
+# The natural shape for a single-node setup.
 miranda-server --control-plane --worker --database-url sqlite:///tmp/miranda.sqlite
 ```
+
+The join token is persisted in the same database as everything else, so it
+survives a control-plane restart without needing to be regenerated or
+re-distributed to already-connected workers.
 
 Then, from anywhere that can reach the control plane's HTTP API:
 
@@ -89,6 +98,30 @@ Then, from anywhere that can reach the control plane's HTTP API:
 cargo run -p miranda-cli -- submit workflow.yaml --server http://localhost:8080
 cargo run -p miranda-cli -- status <execution-id> --server http://localhost:8080
 ```
+
+## High availability
+
+Run more than one `--control-plane` instance against the same
+`--database-url` and they'll automatically coordinate, no separate cluster
+configuration needed, the shared database is the cluster:
+
+```bash
+# Instance 1
+miranda-server --control-plane --database-url postgres://user:pass@localhost/miranda \
+  --grpc-bind 0.0.0.0:7433 --http-bind 0.0.0.0:8080
+
+# Instance 2, same database, different ports
+miranda-server --control-plane --database-url postgres://user:pass@localhost/miranda \
+  --grpc-bind 0.0.0.0:7434 --http-bind 0.0.0.0:8081
+```
+
+Both instances stay fully active for worker traffic (task claiming, result
+reporting, workflow submission, all already safe under concurrent access via
+the shared database's own locking). One instance is elected leader via a
+lease held in the database and automatically hands off if that instance goes
+down. Task-ready notifications also propagate directly between instances, so
+a worker connected to any instance gets woken promptly regardless of which
+instance actually enqueued the work.
 
 All three SQL backends (Postgres, MySQL, SQLite) are fully supported for
 distributed mode, including the task queue and worker registry, which are
@@ -143,11 +176,14 @@ crates/
 
 Miranda is under active development. Embedded execution and distributed
 execution (including durable, SQL-backed coordination across all three
-supported databases) are built and verified under real concurrent load. See
-`MIRANDA_ROADMAP.md` for exactly what's been run for real versus what's
-merely compiled, and what's still ahead, including a Kubernetes-kubeadm-
-style init/join deployment flow, streaming task notification, and a future
-SDK for running arbitrary user code as a task.
+supported databases) are built and verified under real concurrent load.
+Distributed mode includes workers waking immediately on task availability
+instead of waiting on a poll timer, a Kubernetes-kubeadm-style `init`/`join`
+flow with join-token authentication, and high availability, multiple
+control-plane instances sharing one database, with automatic leader election
+and failover, and cross-instance task notification. Still ahead: a future
+SDK for running arbitrary user code as a task. See `MIRANDA_ROADMAP.md` for
+exactly what's been run for real versus what's merely compiled.
 
 ## License
 
