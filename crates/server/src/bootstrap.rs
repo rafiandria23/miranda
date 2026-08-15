@@ -32,6 +32,32 @@ async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
 }
 
+fn is_unspecified_host(host: &str) -> bool {
+    host == "0.0.0.0" || host == "::" || host == "[::]"
+}
+
+fn resolve_advertise_address(
+    advertise_address: &Option<String>,
+    grpc_addr: SocketAddr,
+) -> Result<String, Box<dyn Error>> {
+    let host = match advertise_address {
+        Some(host) => host.clone(),
+        None => grpc_addr.ip().to_string(),
+    };
+
+    if grpc_addr.ip().is_unspecified() || is_unspecified_host(&host) {
+        return Err(format!(
+            "cannot advertise an unspecified address ({host}) to peers — pass \
+            --advertise-address with a real, dialable host (e.g. 127.0.0.1 for \
+            local testing, or this machine's actual reachable IP/hostname for a \
+            real deployment)"
+        )
+        .into());
+    }
+
+    Ok(format!("http://{host}:{}", grpc_addr.port()))
+}
+
 pub type ServerControlPlane = ControlPlane<
     Arc<dyn TaskQueue>,
     Arc<dyn Router>,
@@ -191,10 +217,9 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
     let grpc_addr = args.grpc_bind.parse()?;
     let http_addr: SocketAddr = args.http_bind.parse()?;
 
-    let peer_manager = Arc::new(PeerManager::new(
-        format!("http://{grpc_addr}"),
-        peer_store.clone(),
-    ));
+    let advertise_address = resolve_advertise_address(&args.advertise_address, grpc_addr)?;
+
+    let peer_manager = Arc::new(PeerManager::new(advertise_address, peer_store.clone()));
     grpc_notifier.set_peers(peer_manager.clone()).await;
     tokio::spawn({
         let peer_manager = peer_manager.clone();
@@ -332,10 +357,9 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
     let grpc_addr = args.grpc_bind.parse()?;
     let http_addr: SocketAddr = args.http_bind.parse()?;
 
-    let peer_manager = Arc::new(PeerManager::new(
-        format!("http://{grpc_addr}"),
-        peer_store.clone(),
-    ));
+    let advertise_address = resolve_advertise_address(&args.advertise_address, grpc_addr)?;
+
+    let peer_manager = Arc::new(PeerManager::new(advertise_address, peer_store.clone()));
     grpc_notifier.set_peers(peer_manager.clone()).await;
     tokio::spawn({
         let peer_manager = peer_manager.clone();
