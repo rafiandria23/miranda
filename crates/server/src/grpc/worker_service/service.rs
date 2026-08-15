@@ -5,9 +5,9 @@ use miranda_control_plane::{
 use miranda_core::{id::WorkerId, workflow::WorkflowTask};
 use miranda_storage::{lease_store::LeaseStore, workflow_store::WorkflowStore};
 use miranda_worker::error::WorkerError;
-use std::{net::SocketAddr, pin::Pin, sync::Arc};
+use std::{pin::Pin, sync::Arc};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
-use tonic::{Request, Response, Status, transport::Server};
+use tonic::{Request, Response, Status};
 
 use super::notifier::GrpcTaskNotifier;
 
@@ -19,9 +19,8 @@ use proto::{
     DeregisterRequest, DeregisterResponse, HeartbeatRequest, HeartbeatResponse, PollTaskRequest,
     PollTaskResponse, RegisterRequest, RegisterResponse, ReportResultRequest, ReportResultResponse,
     SubscribeRequest, TaskAssignment as ProtoTaskAssignment, TaskNotification,
-    TaskResult as ProtoTaskResult, WorkflowTask as ProtoWorkflowTask,
-    task_result::Outcome,
-    worker_service_server::{WorkerService, WorkerServiceServer},
+    TaskResult as ProtoTaskResult, WorkflowTask as ProtoWorkflowTask, task_result::Outcome,
+    worker_service_server::WorkerService,
 };
 
 use super::super::error::to_status;
@@ -161,27 +160,6 @@ where
 
         Ok(Response::new(Box::pin(stream)))
     }
-}
-
-pub async fn serve<Q, R, S, D, N, L>(
-    control_plane: Arc<ControlPlane<Q, R, S, D, N, L>>,
-    notifier: GrpcTaskNotifier,
-    addr: SocketAddr,
-) -> Result<(), tonic::transport::Error>
-where
-    Q: TaskQueue + 'static,
-    R: Router + 'static,
-    S: WorkflowStore + 'static,
-    D: DispatchStrategy + 'static,
-    N: TaskNotifier + 'static,
-    L: LeaseStore + 'static,
-{
-    let service = WorkerServiceImpl::new(control_plane, notifier);
-
-    Server::builder()
-        .add_service(WorkerServiceServer::new(service))
-        .serve(addr)
-        .await
 }
 
 fn parse_worker_id(s: &str) -> Result<WorkerId, Status> {

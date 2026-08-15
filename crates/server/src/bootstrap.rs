@@ -9,7 +9,7 @@ use miranda_control_plane::{
 };
 use miranda_storage::{
     join_token_store::JoinTokenStore, leadership_store::LeadershipStore, lease_store::LeaseStore,
-    workflow_store::WorkflowStore,
+    peer_store::PeerStore, workflow_store::WorkflowStore,
 };
 use miranda_storage_mysql::{config::MySqlConfig, store::MySqlStore};
 use miranda_storage_postgres::{config::PostgresConfig, store::PostgresStore};
@@ -22,7 +22,10 @@ use std::{error::Error, net::SocketAddr, sync::Arc, time::Duration};
 use tokio::net::TcpListener;
 use uuid::Uuid;
 
-use crate::{cli::Cli, grpc::worker_service::notifier::GrpcTaskNotifier};
+use crate::{
+    cli::Cli,
+    grpc::{control_plane_service::peers::PeerManager, worker_service::notifier::GrpcTaskNotifier},
+};
 
 async fn shutdown_signal() {
     let _ = tokio::signal::ctrl_c().await;
@@ -45,6 +48,7 @@ async fn build_control_plane(
         GrpcTaskNotifier,
         Arc<dyn JoinTokenStore>,
         Arc<dyn LeadershipStore>,
+        Arc<dyn PeerStore>,
     ),
     Box<dyn Error>,
 > {
@@ -54,6 +58,7 @@ async fn build_control_plane(
     let lease_store: Arc<dyn LeaseStore>;
     let join_token_store: Arc<dyn JoinTokenStore>;
     let leadership_store: Arc<dyn LeadershipStore>;
+    let peer_store: Arc<dyn PeerStore>;
 
     let grpc_notifier = GrpcTaskNotifier::new();
     let notifier: Arc<dyn TaskNotifier> = Arc::new(grpc_notifier.clone());
@@ -65,6 +70,7 @@ async fn build_control_plane(
         lease_store = backend.clone();
         join_token_store = backend.clone();
         leadership_store = backend.clone();
+        peer_store = backend.clone();
         store = backend;
     } else if database_url.starts_with("postgres://") || database_url.starts_with("postgresql://") {
         let backend = Arc::new(PostgresStore::connect(PostgresConfig::new(database_url)).await?);
@@ -73,6 +79,7 @@ async fn build_control_plane(
         lease_store = backend.clone();
         join_token_store = backend.clone();
         leadership_store = backend.clone();
+        peer_store = backend.clone();
         store = backend;
     } else if let Some(path) = database_url.strip_prefix("sqlite://") {
         let backend = Arc::new(SqliteStore::connect(SqliteConfig::new(path)).await?);
@@ -81,6 +88,7 @@ async fn build_control_plane(
         lease_store = backend.clone();
         join_token_store = backend.clone();
         leadership_store = backend.clone();
+        peer_store = backend.clone();
         store = backend;
     } else {
         return Err(format!("unsupported database URL scheme: {database_url}").into());
@@ -96,6 +104,7 @@ async fn build_control_plane(
         grpc_notifier,
         join_token_store,
         leadership_store,
+        peer_store,
     ))
 }
 
@@ -138,7 +147,7 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
     let database_url = args
         .database_url
         .ok_or("--database-url is required when using --control-plane")?;
-    let (control_plane, notifier, join_token_store, leadership_store) =
+    let (control_plane, grpc_notifier, join_token_store, leadership_store, peer_store) =
         build_control_plane(&database_url).await?;
 
     let token = match args.join_token {
@@ -169,6 +178,13 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
     let grpc_addr = args.grpc_bind.parse()?;
     let http_addr: SocketAddr = args.http_bind.parse()?;
 
+    let peer_manager = Arc::new(PeerManager::new(format!("http://{grpc_addr}"), peer_store));
+    grpc_notifier.set_peers(peer_manager.clone()).await;
+    tokio::spawn({
+        let peer_manager = peer_manager.clone();
+        async move { peer_manager.run().await }
+    });
+
     tracing::info!(grpc = %grpc_addr, http = %http_addr, "starting control-plane servers");
     tracing::info!(
         "join a worker with: miranda-server --worker --control-plane-url http://{grpc_addr} --join-token {token}"
@@ -180,8 +196,7 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
         Duration::from_secs(30),
     ));
 
-    let grpc_server =
-        crate::grpc::worker_service::service::serve(control_plane.clone(), notifier, grpc_addr);
+    let grpc_server = crate::grpc::serve_all(control_plane.clone(), grpc_notifier, grpc_addr);
 
     let http_router = crate::http::router(control_plane.clone());
     let http_listener = TcpListener::bind(http_addr).await?;
@@ -255,7 +270,7 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
         .clone()
         .ok_or("--database-url is required when using --control-plane and --worker together")?;
 
-    let (control_plane, notifier, join_token_store, leadership_store) =
+    let (control_plane, grpc_notifier, join_token_store, leadership_store, peer_store) =
         build_control_plane(&database_url).await?;
 
     let token = match args.join_token {
@@ -300,6 +315,13 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
     let grpc_addr = args.grpc_bind.parse()?;
     let http_addr: SocketAddr = args.http_bind.parse()?;
 
+    let peer_manager = Arc::new(PeerManager::new(format!("http://{grpc_addr}"), peer_store));
+    grpc_notifier.set_peers(peer_manager.clone()).await;
+    tokio::spawn({
+        let peer_manager = peer_manager.clone();
+        async move { peer_manager.run().await }
+    });
+
     tracing::info!(
         grpc = %grpc_addr,
         http = %http_addr,
@@ -315,8 +337,7 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
         Duration::from_secs(30),
     ));
 
-    let grpc_server =
-        crate::grpc::worker_service::service::serve(control_plane.clone(), notifier, grpc_addr);
+    let grpc_server = crate::grpc::serve_all(control_plane.clone(), grpc_notifier, grpc_addr);
 
     let http_router = crate::http::router(control_plane.clone());
     let http_listener = TcpListener::bind(http_addr).await?;

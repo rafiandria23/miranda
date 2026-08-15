@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin};
+use std::{future::Future, pin::Pin, sync::Arc};
 use time::Duration;
 
 use crate::error::StorageError;
@@ -31,4 +31,35 @@ pub trait PeerStore: Send + Sync {
         &'a self,
         threshold: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<PeerInfo>, StorageError>> + Send + 'a>>;
+}
+
+impl PeerStore for Arc<dyn PeerStore + '_> {
+    fn register<'a>(
+        &'a self,
+        id: &'a str,
+        grpc_address: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        (**self).register(id, grpc_address)
+    }
+
+    fn touch<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        (**self).touch(id)
+    }
+
+    fn deregister<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        (**self).deregister(id)
+    }
+
+    fn list_active<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<PeerInfo>, StorageError>> + Send + 'a>> {
+        (**self).list_active(threshold)
+    }
 }
