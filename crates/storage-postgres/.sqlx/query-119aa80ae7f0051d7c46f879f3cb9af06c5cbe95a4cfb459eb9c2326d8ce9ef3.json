@@ -1,0 +1,40 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT id, grpc_address FROM control_plane_instances WHERE last_heartbeat > $1",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "control_plane_instances",
+            "name": "id"
+          }
+        }
+      },
+      {
+        "ordinal": 1,
+        "name": "grpc_address",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "control_plane_instances",
+            "name": "grpc_address"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false,
+      false
+    ]
+  },
+  "hash": "119aa80ae7f0051d7c46f879f3cb9af06c5cbe95a4cfb459eb9c2326d8ce9ef3"
+}

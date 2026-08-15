@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM control_plane_instances WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "70bb57ba3c443de73f4333e4aae7a9554c6a2d58ffa89350b47ba4d95732a888"
+}

@@ -1,0 +1,26 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO leadership (id, holder_id, expires_at)\n                VALUES (?1, ?2, ?3)\n                ON CONFLICT (id) DO UPDATE\n                SET holder_id = ?2, expires_at = ?3\n                WHERE leadership.expires_at < ?4\n                RETURNING holder_id\n                ",
+  "describe": {
+    "columns": [
+      {
+        "name": "holder_id",
+        "ordinal": 0,
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "leadership",
+            "name": "holder_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "f717ae456b0ca360ef203dc85febbfcd38b1efe7f80d4cc48e42fee66a373570"
+}

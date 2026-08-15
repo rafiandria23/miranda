@@ -1302,6 +1302,7 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
+ "tracing",
  "uuid",
 ]
 
@@ -1346,12 +1347,16 @@ dependencies = [
  "prost",
  "serde",
  "serde_json",
+ "time",
  "tokio",
+ "tokio-stream",
+ "tokio-util",
  "tonic",
  "tonic-prost",
  "tonic-prost-build",
  "tracing",
  "tracing-subscriber",
+ "uuid",
 ]
 
 [[package]]
@@ -1423,6 +1428,7 @@ dependencies = [
  "thiserror",
  "time",
  "tokio",
+ "tokio-stream",
  "tokio-util",
  "tracing",
 ]

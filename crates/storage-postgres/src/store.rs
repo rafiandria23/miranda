@@ -1,11 +1,21 @@
 use miranda_core::{
     execution::{Execution, ExecutionStatus},
     id::{ExecutionId, TaskQueueEntryId, WorkerId, WorkflowId, WorkflowTaskId, WorkflowVersionId},
+    lease::Lease,
     queue::QueuedTask,
     router::WorkerRegistration,
     workflow::WorkflowDefinition,
 };
-use miranda_storage::{RouterStore, StorageError, TaskQueueStore, WorkflowStore};
+use miranda_storage::{
+    error::StorageError,
+    join_token_store::JoinTokenStore,
+    leadership_store::LeadershipStore,
+    lease_store::LeaseStore,
+    peer_store::{PeerInfo, PeerStore},
+    router_store::RouterStore,
+    task_queue_store::TaskQueueStore,
+    workflow_store::WorkflowStore,
+};
 use sqlx::postgres::{PgPool, PgPoolOptions};
 use std::{future::Future, pin::Pin};
 use time::{Duration, OffsetDateTime};
@@ -529,6 +539,383 @@ impl WorkflowStore for PostgresStore {
         })
     }
 }
+
+// =========================================================================
+// Lease Store Implementation
+// =========================================================================
+
+impl LeaseStore for PostgresStore {
+    fn create<'a>(
+        &'a self,
+        lease: Lease,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(
+                r#"
+                INSERT INTO leases (token, execution_id, workflow_task_id, worker_id, expires_at)
+                VALUES ($1, $2, $3, $4, $5)
+                "#,
+                lease.token,
+                lease.execution_id.as_uuid(),
+                lease.workflow_task_id.as_uuid(),
+                lease.worker_id.as_uuid(),
+                lease.expires_at,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(map_insert_error)?;
+
+            Ok(())
+        })
+    }
+
+    fn get<'a>(
+        &'a self,
+        token: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<Lease>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let row = sqlx::query!(
+                r#"SELECT token, execution_id, workflow_task_id, worker_id, expires_at FROM leases WHERE token = $1"#,
+                token,
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            let Some(row) = row else {
+                return Ok(None);
+            };
+
+            Ok(Some(Lease {
+                token: row.token,
+                execution_id: ExecutionId::from_uuid(row.execution_id),
+                workflow_task_id: WorkflowTaskId::from_uuid(row.workflow_task_id),
+                worker_id: WorkerId::from_uuid(row.worker_id),
+                expires_at: row.expires_at,
+            }))
+        })
+    }
+
+    fn renew<'a>(
+        &'a self,
+        token: &'a str,
+        new_expires_at: OffsetDateTime,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(
+                r#"UPDATE leases SET expires_at = $1 WHERE token = $2"#,
+                new_expires_at,
+                token,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn release<'a>(
+        &'a self,
+        token: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(r#"DELETE FROM leases WHERE token = $1"#, token)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn active_for_worker<'a>(
+        &'a self,
+        worker_id: WorkerId,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let rows = sqlx::query!(
+                r#"SELECT token FROM leases WHERE worker_id = $1 AND expires_at > $2"#,
+                worker_id.as_uuid(),
+                OffsetDateTime::now_utc(),
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(rows.into_iter().map(|r| r.token).collect())
+        })
+    }
+
+    fn reap_expired<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<Lease>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let now = OffsetDateTime::now_utc();
+
+            let rows = sqlx::query!(
+                r#"DELETE FROM leases WHERE expires_at < $1 RETURNING token, execution_id, workflow_task_id, worker_id, expires_at"#,
+                now,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(rows
+                .into_iter()
+                .map(|row| Lease {
+                    token: row.token,
+                    execution_id: ExecutionId::from_uuid(row.execution_id),
+                    workflow_task_id: WorkflowTaskId::from_uuid(row.workflow_task_id),
+                    worker_id: WorkerId::from_uuid(row.worker_id),
+                    expires_at: row.expires_at,
+                })
+                .collect())
+        })
+    }
+}
+
+// =========================================================================
+// Join Token Store Implementation
+// =========================================================================
+
+impl JoinTokenStore for PostgresStore {
+    fn set_token<'a>(
+        &'a self,
+        token: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut tx = self
+                .pool
+                .begin()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            sqlx::query!(r#"DELETE FROM join_tokens"#)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            sqlx::query!(r#"INSERT INTO join_tokens (token) VALUES ($1)"#, token)
+                .execute(&mut *tx)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            tx.commit()
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn get_token<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let row = sqlx::query!(r#"SELECT token FROM join_tokens LIMIT 1"#)
+                .fetch_optional(&self.pool)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(row.map(|r| r.token))
+        })
+    }
+}
+
+// =========================================================================
+// Leadership Store Implementation
+// =========================================================================
+
+const LEADERSHIP_ROW_ID: &str = "control-plane";
+
+impl LeadershipStore for PostgresStore {
+    fn try_acquire<'a>(
+        &'a self,
+        holder_id: &'a str,
+        ttl: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let expires_at = OffsetDateTime::now_utc() + ttl;
+            let now = OffsetDateTime::now_utc();
+
+            let row = sqlx::query!(
+                r#"
+                INSERT INTO leadership (id, holder_id, expires_at)
+                VALUES ($1, $2, $3)
+                ON CONFLICT (id) DO UPDATE
+                SET holder_id = $2, expires_at = $3
+                WHERE leadership.expires_at < $4
+                RETURNING holder_id
+                "#,
+                LEADERSHIP_ROW_ID,
+                holder_id,
+                expires_at,
+                now,
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(row.is_some())
+        })
+    }
+
+    fn renew<'a>(
+        &'a self,
+        holder_id: &'a str,
+        ttl: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<bool, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let expires_at = OffsetDateTime::now_utc() + ttl;
+            let now = OffsetDateTime::now_utc();
+
+            let result = sqlx::query!(
+                r#"
+                UPDATE leadership
+                SET expires_at = $1
+                WHERE id = $2 AND holder_id = $3 AND expires_at > $4
+                "#,
+                expires_at,
+                LEADERSHIP_ROW_ID,
+                holder_id,
+                now,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(result.rows_affected() > 0)
+        })
+    }
+
+    fn release<'a>(
+        &'a self,
+        holder_id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(
+                r#"DELETE FROM leadership WHERE id = $1 AND holder_id = $2"#,
+                LEADERSHIP_ROW_ID,
+                holder_id,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn current_holder<'a>(
+        &'a self,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let now = OffsetDateTime::now_utc();
+
+            let row = sqlx::query!(
+                r#"SELECT holder_id FROM leadership WHERE id = $1 AND expires_at > $2"#,
+                LEADERSHIP_ROW_ID,
+                now,
+            )
+            .fetch_optional(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(row.map(|r| r.holder_id))
+        })
+    }
+}
+
+// =========================================================================
+// Peer Store Implementation
+// =========================================================================
+
+impl PeerStore for PostgresStore {
+    fn register<'a>(
+        &'a self,
+        id: &'a str,
+        grpc_address: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(
+                r#"
+                INSERT INTO control_plane_instances (id, grpc_address, last_heartbeat)
+                VALUES ($1, $2, now())
+                ON CONFLICT (id) DO UPDATE
+                SET grpc_address = $2, last_heartbeat = now()
+                "#,
+                id,
+                grpc_address,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn touch<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(
+                r#"UPDATE control_plane_instances SET last_heartbeat = now() WHERE id = $1"#,
+                id,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn deregister<'a>(
+        &'a self,
+        id: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            sqlx::query!(r#"DELETE FROM control_plane_instances WHERE id = $1"#, id)
+                .execute(&self.pool)
+                .await
+                .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(())
+        })
+    }
+
+    fn list_active<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<PeerInfo>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let cutoff = OffsetDateTime::now_utc() - threshold;
+
+            let rows = sqlx::query!(
+                r#"SELECT id, grpc_address FROM control_plane_instances WHERE last_heartbeat > $1"#,
+                cutoff,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(rows
+                .into_iter()
+                .map(|r| PeerInfo {
+                    id: r.id,
+                    grpc_address: r.grpc_address,
+                })
+                .collect())
+        })
+    }
+}
+
+// =========================================================================
+// Testing
+// =========================================================================
 
 #[cfg(test)]
 mod tests {

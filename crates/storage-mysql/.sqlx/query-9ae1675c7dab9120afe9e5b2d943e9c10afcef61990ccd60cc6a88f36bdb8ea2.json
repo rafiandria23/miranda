@@ -1,0 +1,31 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT holder_id FROM leadership WHERE id = ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "holder_id",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | NO_DEFAULT_VALUE",
+          "collation": 255,
+          "max_size": 1020
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.leadership",
+            "name": "holder_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "9ae1675c7dab9120afe9e5b2d943e9c10afcef61990ccd60cc6a88f36bdb8ea2"
+}

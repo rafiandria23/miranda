@@ -1,0 +1,31 @@
+{
+  "db_name": "MySQL",
+  "query": "SELECT token FROM leases WHERE worker_id = ? AND expires_at > ?",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "token",
+        "type_info": {
+          "type": "VarString",
+          "flags": "NOT_NULL | PRIMARY_KEY | NO_DEFAULT_VALUE",
+          "collation": 255,
+          "max_size": 1020
+        },
+        "origin": {
+          "Table": {
+            "table": "miranda.leases",
+            "name": "token"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "37f9423517558374e7c43971d067230bfe08b3c5f1c6e0bbaa7c3408fb7b2aa3"
+}

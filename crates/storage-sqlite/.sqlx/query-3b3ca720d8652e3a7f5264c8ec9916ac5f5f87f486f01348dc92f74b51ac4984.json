@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                INSERT INTO control_plane_instances (id, grpc_address, last_heartbeat)\n                VALUES (?1, ?2, ?3)\n                ON CONFLICT (id) DO UPDATE\n                SET grpc_address = ?2, last_heartbeat = ?3\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 3
+    },
+    "nullable": []
+  },
+  "hash": "3b3ca720d8652e3a7f5264c8ec9916ac5f5f87f486f01348dc92f74b51ac4984"
+}

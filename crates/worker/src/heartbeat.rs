@@ -1,12 +1,12 @@
 use miranda_core::id::WorkerId;
-use std::{future::Future, sync::Arc, time::Duration};
+use std::{future::Future, sync::Arc};
+use time::Duration;
 use tokio::sync::Notify;
-use tracing::{debug, error, info, warn};
 
 use crate::ControlPlaneClient;
 
-pub const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::from_secs(30);
-pub const DEFAULT_MAX_CONSECUTIVE_HEARTBEAT_FAILURES: u32 = 3;
+pub const DEFAULT_HEARTBEAT_INTERVAL: Duration = Duration::seconds(30);
+pub const DEFAULT_MAX_CONSECUTIVE_HEARTBEAT_FAILURES: u32 = 6;
 
 pub struct HeartbeatRunner<C> {
     worker_id: WorkerId,
@@ -49,7 +49,12 @@ where
         F: Fn() -> Fut + Send + Sync + 'static,
         Fut: Future<Output = Vec<String>> + Send,
     {
-        let mut interval_timer = tokio::time::interval(self.interval);
+        let std_interval: std::time::Duration = self
+            .interval
+            .try_into()
+            .expect("heartbeat interval must be non-negative");
+
+        let mut interval_timer = tokio::time::interval(std_interval);
         let mut consecutive_failures = 0u32;
 
         loop {
@@ -57,12 +62,12 @@ where
                 _ = interval_timer.tick() => {
                     let leases = get_active_leases().await;
 
-                    debug!(worker_id = %self.worker_id, lease_count = leases.len(), "sending heartbeat");
+                    tracing::debug!(worker_id = %self.worker_id, lease_count = leases.len(), "sending heartbeat");
 
                     match self.client.heartbeat(self.worker_id, &leases).await {
                         Ok(()) => {
                             if consecutive_failures > 0 {
-                                info!(worker_id = %self.worker_id, "heartbeat recovered");
+                                tracing::info!(worker_id = %self.worker_id, "heartbeat recovered");
                             }
 
                             consecutive_failures = 0;
@@ -71,7 +76,7 @@ where
                         Err(e) => {
                             consecutive_failures += 1;
 
-                            warn!(
+                            tracing::warn!(
                                 worker_id = %self.worker_id,
                                 error = %e,
                                 consecutive_failures,
@@ -79,7 +84,7 @@ where
                             );
 
                             if consecutive_failures >= self.max_consecutive_failures {
-                                error!(
+                                tracing::error!(
                                     worker_id = %self.worker_id,
                                     max_failures = self.max_consecutive_failures,
                                     "heartbeat max failures reached, shutting down"
@@ -92,7 +97,7 @@ where
                 }
 
                 _ = self.shutdown.notified() => {
-                    info!(worker_id = %self.worker_id, "heartbeat runner shutting down");
+                    tracing::info!(worker_id = %self.worker_id, "heartbeat runner shutting down");
 
                     break;
                 }

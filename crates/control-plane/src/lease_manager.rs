@@ -1,47 +1,22 @@
-use miranda_core::id::{ExecutionId, WorkerId, WorkflowTaskId};
-use std::{collections::HashMap, sync::Arc, time::Instant};
-use time::Duration;
-use tokio::sync::RwLock;
+use miranda_core::{
+    id::{ExecutionId, WorkerId, WorkflowTaskId},
+    lease::Lease,
+};
+use miranda_storage::lease_store::LeaseStore;
+use time::{Duration, OffsetDateTime};
 use uuid::Uuid;
 
 use crate::error::ControlPlaneError;
 
 pub const DEFAULT_LEASE_TTL: Duration = Duration::seconds(60);
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct LeaseToken(pub String);
-
-#[derive(Debug, Clone)]
-pub struct Lease {
-    pub token: LeaseToken,
-    pub execution_id: ExecutionId,
-    pub workflow_task_id: WorkflowTaskId,
-    pub worker_id: WorkerId,
-    pub expires_at: Instant,
-    pub ttl: Duration,
+pub struct LeaseManager<S> {
+    store: S,
 }
 
-impl Lease {
-    pub fn is_expired(&self) -> bool {
-        Instant::now() > self.expires_at
-    }
-
-    pub fn renew(&mut self) {
-        let std_ttl: std::time::Duration =
-            self.ttl.try_into().expect("lease TTL must be non-negative");
-
-        self.expires_at = Instant::now() + std_ttl;
-    }
-}
-
-#[derive(Debug, Default)]
-pub struct LeaseManager {
-    leases: Arc<RwLock<HashMap<LeaseToken, Lease>>>,
-}
-
-impl LeaseManager {
-    pub fn new() -> Self {
-        Self::default()
+impl<S: LeaseStore> LeaseManager<S> {
+    pub fn new(store: S) -> Self {
+        Self { store }
     }
 
     pub async fn create(
@@ -50,38 +25,35 @@ impl LeaseManager {
         workflow_task_id: WorkflowTaskId,
         worker_id: WorkerId,
         ttl: Duration,
-    ) -> LeaseToken {
-        let token = LeaseToken(Uuid::new_v4().to_string());
+    ) -> Result<String, ControlPlaneError> {
+        let token = Uuid::new_v4().to_string();
+        let expires_at = OffsetDateTime::now_utc() + ttl;
 
-        let std_ttl: std::time::Duration = ttl.try_into().expect("lease TTL must be non-negative");
+        self.store
+            .create(Lease {
+                token: token.clone(),
+                execution_id,
+                workflow_task_id,
+                worker_id,
+                expires_at,
+            })
+            .await
+            .map_err(ControlPlaneError::from)?;
 
-        let lease = Lease {
-            token: token.clone(),
-            execution_id,
-            workflow_task_id,
-            worker_id,
-            expires_at: Instant::now() + std_ttl,
-            ttl,
-        };
-
-        let mut leases = self.leases.write().await;
-        leases.insert(token.clone(), lease);
-
-        token
+        Ok(token)
     }
 
     pub async fn validate(
         &self,
-        token: &LeaseToken,
+        token: &str,
         worker_id: WorkerId,
     ) -> Result<Lease, ControlPlaneError> {
-        let leases = self.leases.read().await;
-        let lease = leases
+        let lease = self
+            .store
             .get(token)
-            .ok_or(ControlPlaneError::InvalidRequest(
-                "invalid lease token".to_string(),
-            ))?
-            .clone();
+            .await
+            .map_err(ControlPlaneError::from)?
+            .ok_or_else(|| ControlPlaneError::InvalidRequest("invalid lease token".to_string()))?;
 
         if lease.is_expired() {
             return Err(ControlPlaneError::InvalidRequest(
@@ -98,52 +70,30 @@ impl LeaseManager {
         Ok(lease)
     }
 
-    pub async fn release(&self, token: &LeaseToken) -> Result<(), ControlPlaneError> {
-        let mut leases = self.leases.write().await;
-
-        leases
-            .remove(token)
-            .ok_or(ControlPlaneError::InvalidRequest(
-                "lease not found".to_string(),
-            ))?;
-
-        Ok(())
+    pub async fn release(&self, token: &str) -> Result<(), ControlPlaneError> {
+        self.store
+            .release(token)
+            .await
+            .map_err(ControlPlaneError::from)
     }
 
-    pub async fn renew(&self, token: &LeaseToken) -> Result<(), ControlPlaneError> {
-        let mut leases = self.leases.write().await;
-        let lease = leases
-            .get_mut(token)
-            .ok_or(ControlPlaneError::InvalidRequest(
-                "lease not found".to_string(),
-            ))?;
+    pub async fn renew(&self, token: &str, ttl: Duration) -> Result<(), ControlPlaneError> {
+        let new_expires_at = OffsetDateTime::now_utc() + ttl;
 
-        lease.renew();
-
-        Ok(())
+        self.store
+            .renew(token, new_expires_at)
+            .await
+            .map_err(ControlPlaneError::from)
     }
 
-    pub async fn get_active_leases(&self, worker_id: WorkerId) -> Vec<LeaseToken> {
-        let leases = self.leases.read().await;
-
-        leases
-            .values()
-            .filter(|l| l.worker_id == worker_id && !l.is_expired())
-            .map(|l| l.token.clone())
-            .collect()
+    pub async fn get_active_leases(&self, worker_id: WorkerId) -> Vec<String> {
+        self.store
+            .active_for_worker(worker_id)
+            .await
+            .unwrap_or_default()
     }
 
     pub async fn reap_expired(&self) -> Vec<Lease> {
-        let mut leases = self.leases.write().await;
-        let expired: Vec<LeaseToken> = leases
-            .iter()
-            .filter(|(_, l)| l.is_expired())
-            .map(|(t, _)| t.clone())
-            .collect();
-
-        expired
-            .into_iter()
-            .filter_map(|t| leases.remove(&t))
-            .collect()
+        self.store.reap_expired().await.unwrap_or_default()
     }
 }

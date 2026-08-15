@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "\n                UPDATE leadership\n                SET expires_at = ?1\n                WHERE id = ?2 AND holder_id = ?3 AND expires_at > ?4\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "8561a1cc69892d64a0d036b2269f60763de38beaf61d11b95bf17f33a617cb77"
+}

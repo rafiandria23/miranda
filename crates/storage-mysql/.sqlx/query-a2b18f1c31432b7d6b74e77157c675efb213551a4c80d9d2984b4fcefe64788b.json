@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "UPDATE control_plane_instances SET last_heartbeat = ? WHERE id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "a2b18f1c31432b7d6b74e77157c675efb213551a4c80d9d2984b4fcefe64788b"
+}

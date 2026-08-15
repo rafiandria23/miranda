@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM leases WHERE expires_at < ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "542a02800c45fef1c9f95a7ef2699cdf931d2d09174a7d27da900ae7e4b06fe9"
+}

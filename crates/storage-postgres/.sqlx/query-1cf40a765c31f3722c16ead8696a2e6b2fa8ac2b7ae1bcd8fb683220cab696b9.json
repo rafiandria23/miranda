@@ -1,0 +1,14 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "INSERT INTO join_tokens (token) VALUES ($1)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Left": [
+        "Text"
+      ]
+    },
+    "nullable": []
+  },
+  "hash": "1cf40a765c31f3722c16ead8696a2e6b2fa8ac2b7ae1bcd8fb683220cab696b9"
+}

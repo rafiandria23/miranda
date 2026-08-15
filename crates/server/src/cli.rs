@@ -15,6 +15,9 @@ pub struct Cli {
     #[arg(long)]
     pub control_plane_url: Option<String>,
 
+    #[arg(long)]
+    pub join_token: Option<String>,
+
     #[arg(long, default_value = "0.0.0.0:7433")]
     pub grpc_bind: String,
 

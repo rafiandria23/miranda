@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS workers (
+  id CHAR(36) PRIMARY KEY,
+  capabilities JSON NOT NULL,
+  last_heartbeat TIMESTAMP NOT NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;

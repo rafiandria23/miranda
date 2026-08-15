@@ -2,14 +2,14 @@ use miranda_core::id::WorkerId;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
-    time::Duration,
 };
+use time::Duration;
 use tokio::{
-    sync::{RwLock, mpsc},
+    sync::{RwLock, mpsc, oneshot},
     task::{JoinHandle, JoinSet},
 };
+use tokio_stream::StreamExt;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
 
 use crate::{
     assignment::{ControlPlaneClient, TaskAssignment},
@@ -32,8 +32,8 @@ impl Default for WorkerConfig {
         Self {
             heartbeat_interval: DEFAULT_HEARTBEAT_INTERVAL,
             max_consecutive_heartbeat_failures: DEFAULT_MAX_CONSECUTIVE_HEARTBEAT_FAILURES,
-            poll_interval: Duration::from_secs(6),
-            drain_timeout: Duration::from_secs(60),
+            poll_interval: Duration::seconds(6),
+            drain_timeout: Duration::seconds(60),
         }
     }
 }
@@ -49,6 +49,7 @@ impl WorkerHandle {
 
         match self.task_handle.await {
             Ok(result) => result,
+
             Err(e) => Err(WorkerError::ExecutionFailed {
                 message: format!("worker task panicked: {}", e),
             }),
@@ -62,6 +63,7 @@ pub struct Worker<C, E> {
     control_plane: Arc<C>,
     executor: Arc<E>,
     config: WorkerConfig,
+    token: String,
 }
 
 impl<C, E> Worker<C, E>
@@ -74,6 +76,7 @@ where
         control_plane: Arc<C>,
         executor: Arc<E>,
         config: WorkerConfig,
+        token: String,
     ) -> Self {
         Self {
             id: WorkerId::new(),
@@ -81,6 +84,7 @@ where
             control_plane,
             executor,
             config,
+            token,
         }
     }
 
@@ -92,19 +96,34 @@ where
         &self.capabilities
     }
 
-    pub fn run(self) -> WorkerHandle {
+    pub fn run(self) -> (WorkerHandle, oneshot::Receiver<Result<(), WorkerError>>) {
         let shutdown = CancellationToken::new();
         let shutdown_for_task = shutdown.clone();
+
+        let (started_tx, started_rx) = oneshot::channel();
 
         let worker_id = self.id;
         let capabilities = self.capabilities;
         let control_plane = self.control_plane;
         let executor = self.executor;
         let config = self.config;
+        let token = self.token;
 
         let task_handle = tokio::spawn(async move {
-            info!(worker_id = %worker_id, "registering with control plane");
-            control_plane.register(worker_id, &capabilities).await?;
+            tracing::info!(worker_id = %worker_id, "registering with control plane");
+
+            if let Err(e) = control_plane
+                .register(worker_id, &capabilities, &token)
+                .await
+            {
+                tracing::error!(worker_id = %worker_id, error = %e, "registration failed, worker will not start");
+
+                let _ = started_tx.send(Err(e.clone()));
+
+                return Err(e);
+            }
+
+            let _ = started_tx.send(Ok(()));
 
             let (active_tx, mut active_rx) = mpsc::channel::<()>(1);
 
@@ -122,7 +141,7 @@ where
                     biased;
 
                     _ = active_rx.recv() => {
-                        info!(worker_id = %worker_id, "no active tasks remain, heartbeat stopping");
+                        tracing::info!(worker_id = %worker_id, "no active tasks remain, heartbeat stopping");
                     }
 
                     _ = heartbeat_runner.run(move || {
@@ -182,12 +201,12 @@ where
 
                     Some(result) = in_flight.join_next(), if !in_flight.is_empty() => {
                         if let Err(join_error) = result {
-                            error!(worker_id = %worker_id, error = %join_error, "task panicked");
+                            tracing::error!(worker_id = %worker_id, error = %join_error, "task panicked");
                         }
                     }
 
                     _ = shutdown_for_task.cancelled() => {
-                        info!(worker_id = %worker_id, "shutdown signaled, draining active tasks");
+                        tracing::info!(worker_id = %worker_id, "shutdown signaled, draining active tasks");
 
                         break;
                     }
@@ -200,16 +219,21 @@ where
 
             drop(active_tx);
 
-            let drain_result = tokio::time::timeout(config.drain_timeout, async {
+            let std_drain_timeout: std::time::Duration = config
+                .drain_timeout
+                .try_into()
+                .expect("drain timeout must be non-negative");
+
+            let drain_result = tokio::time::timeout(std_drain_timeout, async {
                 while let Some(result) = in_flight.join_next().await {
                     if let Err(join_error) = result {
-                        error!(worker_id = %worker_id, error = %join_error, "task panicked during drain");
+                        tracing::error!(worker_id = %worker_id, error = %join_error, "task panicked during drain");
                     }
                 }
             }).await;
 
             if drain_result.is_err() {
-                warn!(
+                tracing::warn!(
                     worker_id = %worker_id,
                     remaining = in_flight.len(),
                     "drain timeout exceeded, aborting remaining tasks"
@@ -225,19 +249,22 @@ where
             heartbeat_shutdown_handle.notify_waiters();
 
             if let Err(e) = heartbeat_handle.await {
-                warn!(worker_id = %worker_id, error = %e, "heartbeat task did not shut down cleanly");
+                tracing::warn!(worker_id = %worker_id, error = %e, "heartbeat task did not shut down cleanly");
             }
 
-            info!(worker_id = %worker_id, "deregistering from control plane");
+            tracing::info!(worker_id = %worker_id, "deregistering from control plane");
             control_plane.deregister(worker_id).await?;
 
             Ok(())
         });
 
-        WorkerHandle {
-            shutdown,
-            task_handle,
-        }
+        (
+            WorkerHandle {
+                shutdown,
+                task_handle,
+            },
+            started_rx,
+        )
     }
 }
 
@@ -249,29 +276,46 @@ async fn run_poll_loop<C: ControlPlaneClient>(
     shutdown: CancellationToken,
     assignment_tx: mpsc::Sender<TaskAssignment>,
 ) {
+    let mut notifications = match control_plane.subscribe(worker_id, &capabilities).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            tracing::warn!(worker_id = %worker_id, error = %e, "subscribe failed, falling back to timer-only polling");
+
+            Box::pin(tokio_stream::pending())
+        }
+    };
+
+    let std_poll_interval: std::time::Duration = poll_interval
+        .try_into()
+        .expect("poll interval must be non-negative");
+
     loop {
         tokio::select! {
             biased;
 
             _ = shutdown.cancelled() => {
-                debug!(worker_id = %worker_id, "poll loop stopping");
+                tracing::debug!(worker_id = %worker_id, "poll loop stopping");
 
                 return;
             }
 
-            _ = tokio::time::sleep(poll_interval) => {
-                match control_plane.poll_task(worker_id, &capabilities).await {
-                    Ok(Some(assignment)) => {
-                        if assignment_tx.send(assignment).await.is_err() {
-                            return;
-                        }
-                    }
+            _ = tokio::time::sleep(std_poll_interval) => {}
 
-                    Ok(None) => debug!(worker_id = %worker_id, "no tasks available"),
+            _ = notifications.next() => {
+                tracing::debug!(worker_id = %worker_id, "woken by task notification");
+            }
+        }
 
-                    Err(e) => warn!(worker_id = %worker_id, error = %e, "poll failed"),
+        match control_plane.poll_task(worker_id, &capabilities).await {
+            Ok(Some(assignment)) => {
+                if assignment_tx.send(assignment).await.is_err() {
+                    return;
                 }
             }
+
+            Ok(None) => tracing::debug!(worker_id = %worker_id, "no tasks available"),
+
+            Err(e) => tracing::warn!(worker_id = %worker_id, error = %e, "poll failed"),
         }
     }
 }
@@ -295,6 +339,6 @@ async fn execute_and_report<C: ControlPlaneClient, E: TaskExecutor>(
         .report_result(worker_id, lease_token, result)
         .await
     {
-        warn!(worker_id = %worker_id, error = %e, "failed to report result");
+        tracing::warn!(worker_id = %worker_id, error = %e, "failed to report result");
     }
 }

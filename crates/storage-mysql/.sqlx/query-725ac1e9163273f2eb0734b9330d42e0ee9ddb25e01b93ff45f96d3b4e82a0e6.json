@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM leadership WHERE id = ? AND holder_id = ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "725ac1e9163273f2eb0734b9330d42e0ee9ddb25e01b93ff45f96d3b4e82a0e6"
+}

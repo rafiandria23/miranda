@@ -1,0 +1,29 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "SELECT holder_id FROM leadership WHERE id = $1 AND expires_at > $2",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "holder_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "leadership",
+            "name": "holder_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "161bdc637470a6184cd032796743e54e4c0586e2e9c554d3ebb7a0dfa59a779b"
+}

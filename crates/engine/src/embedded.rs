@@ -5,7 +5,6 @@ use miranda_core::{
 };
 use miranda_storage::WorkflowStore;
 use miranda_worker::TaskExecutor;
-use tracing::{debug, error, info, instrument};
 
 use crate::{
     EngineError,
@@ -39,13 +38,13 @@ where
     E: TaskExecutor,
     S: WorkflowStore,
 {
-    #[instrument(skip(self, definition), fields(execution_id = %execution.id()))]
+    #[tracing::instrument(skip(self, definition), fields(execution_id = %execution.id()))]
     pub async fn run(
         &self,
         mut execution: Execution,
         definition: &WorkflowDefinition,
     ) -> Result<Execution, EngineError> {
-        info!("starting execution");
+        tracing::info!("starting execution");
 
         execution.apply(
             Event::new(execution.id(), EventPayload::ExecutionStarted),
@@ -63,7 +62,7 @@ where
                 NextAction::Finished(_) => break,
 
                 NextAction::Deadlocked => {
-                    error!("deadlock: no ready tasks but execution not finished");
+                    tracing::error!("deadlock: no ready tasks but execution not finished");
 
                     return Err(EngineError::Deadlock);
                 }
@@ -75,7 +74,7 @@ where
                             .expect("ready task must exist in definition");
 
                         if workflow_task.task_type() == "noop" {
-                            debug!(task_id = %workflow_task_id, "noop task, completing without dispatch");
+                            tracing::debug!(task_id = %workflow_task_id, "noop task, completing without dispatch");
 
                             execution.apply(
                                 Event::new(
@@ -126,7 +125,7 @@ where
         )?;
         self.store.update_execution(&execution, version).await?;
 
-        info!("execution completed");
+        tracing::info!("execution completed");
 
         Ok(execution)
     }

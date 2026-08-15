@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM leadership WHERE id = ?1 AND holder_id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "639e8ed98e6e02a2c8f7e9f453951b3ace5a6b06f8692f968412aaf35ae349d0"
+}

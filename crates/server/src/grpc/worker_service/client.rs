@@ -1,11 +1,12 @@
 use miranda_core::{id::WorkerId, workflow::WorkflowTask};
 use miranda_worker::{ControlPlaneClient, WorkerError, assignment::TaskAssignment};
-use std::{collections::HashSet, time::Duration};
+use std::{collections::HashSet, pin::Pin, time::Duration};
+use tokio_stream::{Stream, StreamExt};
 use tonic::{Status, transport::Channel};
 
 use super::service::proto::{
     DeregisterRequest, Failure, HeartbeatRequest, PollTaskRequest, RegisterRequest,
-    ReportResultRequest, Success, TaskAssignment as ProtoTaskAssignment,
+    ReportResultRequest, SubscribeRequest, Success, TaskAssignment as ProtoTaskAssignment,
     TaskResult as ProtoTaskResult, WorkflowTask as ProtoWorkflowTask, task_result::Outcome,
     worker_service_client::WorkerServiceClient,
 };
@@ -27,6 +28,7 @@ impl ControlPlaneClient for RemoteControlPlaneClient {
         &self,
         worker_id: WorkerId,
         capabilities: &HashSet<String>,
+        token: &str,
     ) -> Result<(), WorkerError> {
         let mut client = self.client.clone();
 
@@ -34,6 +36,7 @@ impl ControlPlaneClient for RemoteControlPlaneClient {
             .register(RegisterRequest {
                 worker_id: worker_id.to_string(),
                 capabilities: capabilities.iter().cloned().collect(),
+                token: token.to_owned(),
             })
             .await
             .map_err(to_worker_error)?;
@@ -118,6 +121,26 @@ impl ControlPlaneClient for RemoteControlPlaneClient {
             .map_err(to_worker_error)?;
 
         Ok(())
+    }
+
+    async fn subscribe(
+        &self,
+        worker_id: WorkerId,
+        capabilities: &HashSet<String>,
+    ) -> Result<Pin<Box<dyn Stream<Item = ()> + Send>>, WorkerError> {
+        let mut client = self.client.clone();
+
+        let response = client
+            .subscribe_to_tasks(SubscribeRequest {
+                worker_id: worker_id.to_string(),
+                capabilities: capabilities.iter().cloned().collect(),
+            })
+            .await
+            .map_err(to_worker_error)?;
+
+        let stream = response.into_inner().filter_map(|t_n| t_n.ok().map(|_| ()));
+
+        Ok(Box::pin(stream))
     }
 }
 

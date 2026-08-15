@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE leases SET expires_at = ?1 WHERE token = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "9263c5ef6ce0ad274b9dde39357c21719a2b6ecbc9e413f90859b5c1615678e2"
+}

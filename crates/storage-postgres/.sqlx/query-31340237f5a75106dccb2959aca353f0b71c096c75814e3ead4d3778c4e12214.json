@@ -1,0 +1,31 @@
+{
+  "db_name": "PostgreSQL",
+  "query": "\n                INSERT INTO leadership (id, holder_id, expires_at)\n                VALUES ($1, $2, $3)\n                ON CONFLICT (id) DO UPDATE\n                SET holder_id = $2, expires_at = $3\n                WHERE leadership.expires_at < $4\n                RETURNING holder_id\n                ",
+  "describe": {
+    "columns": [
+      {
+        "ordinal": 0,
+        "name": "holder_id",
+        "type_info": "Text",
+        "origin": {
+          "Table": {
+            "table": "leadership",
+            "name": "holder_id"
+          }
+        }
+      }
+    ],
+    "parameters": {
+      "Left": [
+        "Text",
+        "Text",
+        "Timestamptz",
+        "Timestamptz"
+      ]
+    },
+    "nullable": [
+      false
+    ]
+  },
+  "hash": "31340237f5a75106dccb2959aca353f0b71c096c75814e3ead4d3778c4e12214"
+}

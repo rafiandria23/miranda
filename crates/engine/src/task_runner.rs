@@ -6,7 +6,6 @@ use miranda_core::{
     workflow::WorkflowDefinition,
 };
 use miranda_worker::{TaskExecutor, WorkerError};
-use tracing::{debug, error, info, warn};
 
 use crate::{EngineError, retry::RetryPolicy, timer::delay};
 
@@ -45,7 +44,7 @@ where
             _other => return Err(ExecutionError::TaskNotReady(workflow_task_id).into()),
         };
 
-        debug!(task_id = %workflow_task_id, "starting task");
+        tracing::debug!(task_id = %workflow_task_id, "starting task");
 
         execution.apply(Event::new(execution.id(), payload), definition)?;
 
@@ -87,7 +86,7 @@ impl<'a> TaskOutcome<'a> {
     ) -> Result<TaskOutcomeResult, EngineError> {
         match result {
             Ok(()) => {
-                debug!(task_id = %workflow_task_id, "task completed");
+                tracing::debug!(task_id = %workflow_task_id, "task completed");
 
                 execution.apply(
                     Event::new(
@@ -101,7 +100,7 @@ impl<'a> TaskOutcome<'a> {
             }
 
             Err(worker_error) => {
-                warn!(task_id = %workflow_task_id, error = %worker_error, "task failed");
+                tracing::warn!(task_id = %workflow_task_id, error = %worker_error, "task failed");
 
                 let attempt_count = execution
                     .task(workflow_task_id)
@@ -124,7 +123,7 @@ impl<'a> TaskOutcome<'a> {
                 if will_retry {
                     let delay_duration = self.retry_policy.delay_for_attempt(attempt_count + 1);
 
-                    info!(
+                    tracing::info!(
                         task_id = %workflow_task_id,
                         attempt = attempt_count + 1,
                         delay_ms = %delay_duration.as_millis(),
@@ -134,7 +133,7 @@ impl<'a> TaskOutcome<'a> {
 
                     Ok(TaskOutcomeResult::Retried)
                 } else {
-                    error!(task_id = %workflow_task_id, "max retries exceeded");
+                    tracing::error!(task_id = %workflow_task_id, "max retries exceeded");
 
                     execution.apply(
                         Event::new(

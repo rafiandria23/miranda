@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "UPDATE control_plane_instances SET last_heartbeat = ?1 WHERE id = ?2",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 2
+    },
+    "nullable": []
+  },
+  "hash": "9c18e339f2f8aeb404f482843193d68e7fd8e5eb4b88b1b979cb867e614578d1"
+}

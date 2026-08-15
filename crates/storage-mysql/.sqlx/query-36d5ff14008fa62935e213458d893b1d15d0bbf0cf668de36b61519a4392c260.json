@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "\n                UPDATE leadership\n                SET expires_at = ?\n                WHERE id = ? AND holder_id = ? AND expires_at > ?\n                ",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 4
+    },
+    "nullable": []
+  },
+  "hash": "36d5ff14008fa62935e213458d893b1d15d0bbf0cf668de36b61519a4392c260"
+}

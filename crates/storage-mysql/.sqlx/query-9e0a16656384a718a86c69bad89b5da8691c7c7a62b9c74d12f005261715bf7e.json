@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "INSERT INTO join_tokens (token) VALUES (?)",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "9e0a16656384a718a86c69bad89b5da8691c7c7a62b9c74d12f005261715bf7e"
+}
