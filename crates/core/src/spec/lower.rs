@@ -66,3 +66,219 @@ fn task_type_name(config: &TaskConfigSpec) -> &'static str {
         TaskConfigSpec::Noop { .. } => "noop",
     }
 }
+
+// =========================================================================
+// Testing
+// =========================================================================
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+
+    use crate::spec::dto::{StatusMatcher, TaskSpec};
+
+    use super::*;
+
+    fn noop_task() -> TaskSpec {
+        TaskSpec {
+            config: TaskConfigSpec::Noop { message: None },
+            timeout: None,
+            depends_on: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn lower_builds_workflow_and_definition_with_matching_name_and_id() {
+        let mut tasks = BTreeMap::new();
+        tasks.insert("only".to_owned(), noop_task());
+
+        let spec = WorkflowSpec {
+            name: "example".to_owned(),
+            timeout: None,
+            tasks,
+        };
+
+        let (workflow, definition) = lower(spec).unwrap();
+
+        assert_eq!(workflow.name(), "example");
+        assert_eq!(definition.tasks().len(), 1);
+        assert_eq!(workflow.versions().len(), 1);
+        assert_eq!(workflow.versions()[0].definition(), &definition);
+    }
+
+    #[test]
+    fn lower_resolves_named_dependencies_to_task_ids() {
+        let mut tasks = BTreeMap::new();
+        tasks.insert("first".to_owned(), noop_task());
+        tasks.insert(
+            "second".to_owned(),
+            TaskSpec {
+                config: TaskConfigSpec::Noop { message: None },
+                timeout: None,
+                depends_on: vec!["first".to_owned()],
+            },
+        );
+
+        let spec = WorkflowSpec {
+            name: "example".to_owned(),
+            timeout: None,
+            tasks,
+        };
+
+        let (_, definition) = lower(spec).unwrap();
+
+        let first_id = definition
+            .tasks()
+            .iter()
+            .find(|t| t.dependencies().is_empty())
+            .unwrap()
+            .id();
+        let second = definition
+            .tasks()
+            .iter()
+            .find(|t| !t.dependencies().is_empty())
+            .unwrap();
+
+        assert_eq!(second.dependencies(), &[first_id]);
+    }
+
+    #[test]
+    fn lower_rejects_dependency_on_unknown_task() {
+        let mut tasks = BTreeMap::new();
+        tasks.insert(
+            "only".to_owned(),
+            TaskSpec {
+                config: TaskConfigSpec::Noop { message: None },
+                timeout: None,
+                depends_on: vec!["missing".to_owned()],
+            },
+        );
+
+        let spec = WorkflowSpec {
+            name: "example".to_owned(),
+            timeout: None,
+            tasks,
+        };
+
+        let err = lower(spec).unwrap_err();
+
+        match err {
+            SpecError::UnknownDependency(task, dep) => {
+                assert_eq!(task, "only");
+                assert_eq!(dep, "missing");
+            }
+            other => panic!("expected UnknownDependency, got {other:?}"),
+        }
+    }
+
+    #[test]
+    fn lower_sets_task_and_definition_timeouts_from_spec() {
+        let mut tasks = BTreeMap::new();
+        tasks.insert(
+            "only".to_owned(),
+            TaskSpec {
+                config: TaskConfigSpec::Noop { message: None },
+                timeout: Some(30),
+                depends_on: Vec::new(),
+            },
+        );
+
+        let spec = WorkflowSpec {
+            name: "example".to_owned(),
+            timeout: Some(120),
+            tasks,
+        };
+
+        let (_, definition) = lower(spec).unwrap();
+
+        assert_eq!(definition.timeout(), Some(Duration::from_secs(120)));
+        assert_eq!(
+            definition.tasks()[0].timeout(),
+            Some(Duration::from_secs(30))
+        );
+    }
+
+    #[test]
+    fn lower_defaults_timeouts_to_none_when_unset() {
+        let mut tasks = BTreeMap::new();
+        tasks.insert("only".to_owned(), noop_task());
+
+        let spec = WorkflowSpec {
+            name: "example".to_owned(),
+            timeout: None,
+            tasks,
+        };
+
+        let (_, definition) = lower(spec).unwrap();
+
+        assert_eq!(definition.timeout(), None);
+        assert_eq!(definition.tasks()[0].timeout(), None);
+    }
+
+    #[test]
+    fn lower_serializes_task_config_into_the_workflow_task() {
+        let mut tasks = BTreeMap::new();
+        tasks.insert(
+            "only".to_owned(),
+            TaskSpec {
+                config: TaskConfigSpec::Shell {
+                    command: "echo hi".to_owned(),
+                    env: HashMap::new(),
+                    cwd: None,
+                    shell: None,
+                    success_codes: vec![StatusMatcher::Exact(0)],
+                },
+                timeout: None,
+                depends_on: Vec::new(),
+            },
+        );
+
+        let spec = WorkflowSpec {
+            name: "example".to_owned(),
+            timeout: None,
+            tasks,
+        };
+
+        let (_, definition) = lower(spec).unwrap();
+        let task = &definition.tasks()[0];
+
+        assert_eq!(task.task_type(), "shell");
+        assert_eq!(task.config()["command"], "echo hi");
+    }
+
+    #[test]
+    fn task_type_name_maps_each_config_variant() {
+        assert_eq!(
+            task_type_name(&TaskConfigSpec::Shell {
+                command: String::new(),
+                env: HashMap::new(),
+                cwd: None,
+                shell: None,
+                success_codes: Vec::new(),
+            }),
+            "shell"
+        );
+        assert_eq!(
+            task_type_name(&TaskConfigSpec::Http {
+                method: crate::spec::dto::HttpMethod::Get,
+                url: String::new(),
+                query: HashMap::new(),
+                headers: HashMap::new(),
+                body: None,
+                success_codes: Vec::new(),
+            }),
+            "http"
+        );
+        assert_eq!(
+            task_type_name(&TaskConfigSpec::Wait {
+                duration: None,
+                until: None,
+            }),
+            "wait"
+        );
+        assert_eq!(
+            task_type_name(&TaskConfigSpec::Noop { message: None }),
+            "noop"
+        );
+    }
+}

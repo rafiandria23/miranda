@@ -6,6 +6,7 @@ pub mod lease_manager;
 pub mod notifier;
 pub mod queue;
 pub mod router;
+pub mod snapshot_manager;
 
 pub use control_plane::ControlPlane;
 pub use dispatcher::{DispatchStrategy, Dispatcher, RoutedDispatcher};

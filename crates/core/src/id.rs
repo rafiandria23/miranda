@@ -2,7 +2,7 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, str};
 use uuid::Uuid;
 
-// Macro to generate strongly-typed, type-safe domain identifiers.
+// Macro to generate strongly-typed, type-safe domain identifiers
 macro_rules! define_id {
     (
         $(#[$meta:meta])*
@@ -15,22 +15,22 @@ macro_rules! define_id {
         pub struct $name(Uuid);
 
         impl $name {
-            // Generates a new unique identifier (UUIDv7 for time-ordering).
+            // Generates a new unique identifier (UUIDv7 for time-ordering)
             pub fn new() -> Self {
                 Self(Uuid::now_v7())
             }
 
-            // Creates an ID from an existing raw `Uuid`.
+            // Creates an ID from an existing raw Uuid
             pub fn from_uuid(uuid: Uuid) -> Self {
                 Self(uuid)
             }
 
-            // Expose the underlying raw `Uuid`.
+            // Expose the underlying raw Uuid
             pub const fn as_uuid(&self) -> &Uuid {
                 &self.0
             }
 
-            // Unwraps into the inner `Uuid`.
+            // Unwraps into the inner Uuid
             pub fn into_uuid(self) -> Uuid {
                 self.0
             }

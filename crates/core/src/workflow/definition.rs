@@ -127,6 +127,10 @@ impl WorkflowDefinition {
     }
 }
 
+// =========================================================================
+// Testing
+// =========================================================================
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -145,6 +149,7 @@ mod tests {
     #[test]
     fn new_stores_the_given_tasks() {
         let id = WorkflowTaskId::new();
+
         let definition = WorkflowDefinition::new(vec![task(id, vec![])]).unwrap();
 
         assert_eq!(definition.tasks().len(), 1);
@@ -214,6 +219,7 @@ mod tests {
     #[test]
     fn task_returns_the_matching_task() {
         let id = WorkflowTaskId::new();
+
         let definition = WorkflowDefinition::new(vec![task(id, vec![])]).unwrap();
 
         assert_eq!(definition.task(id).unwrap().id(), id);

@@ -7,6 +7,8 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use crate::StorageError;
 
+type BoxFuture<'a, T> = Pin<Box<dyn Future<Output = Result<T, StorageError>> + Send + 'a>>;
+
 pub trait WorkflowStore: Send + Sync {
     fn save_definition<'a>(
         &'a self,
@@ -15,37 +17,27 @@ pub trait WorkflowStore: Send + Sync {
         version_id: WorkflowVersionId,
         version: u64,
         definition: &'a WorkflowDefinition,
-    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>>;
+    ) -> BoxFuture<'a, ()>;
 
-    fn get_versions<'a>(
-        &'a self,
-        workflow_id: WorkflowId,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<WorkflowVersionId>, StorageError>> + Send + 'a>>;
+    fn get_versions<'a>(&'a self, workflow_id: WorkflowId)
+    -> BoxFuture<'a, Vec<WorkflowVersionId>>;
 
     fn get_definition<'a>(
         &'a self,
         version_id: WorkflowVersionId,
-    ) -> Pin<Box<dyn Future<Output = Result<WorkflowDefinition, StorageError>> + Send + 'a>>;
+    ) -> BoxFuture<'a, WorkflowDefinition>;
 
-    fn save_execution<'a>(
-        &'a self,
-        execution: &'a Execution,
-    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>>;
+    fn save_execution<'a>(&'a self, execution: &'a Execution) -> BoxFuture<'a, ()>;
 
     fn update_execution<'a>(
         &'a self,
         execution: &'a Execution,
         expected_version: u64,
-    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>>;
+    ) -> BoxFuture<'a, ()>;
 
-    fn get_execution<'a>(
-        &'a self,
-        execution_id: ExecutionId,
-    ) -> Pin<Box<dyn Future<Output = Result<(Execution, u64), StorageError>> + Send + 'a>>;
+    fn get_execution<'a>(&'a self, execution_id: ExecutionId) -> BoxFuture<'a, (Execution, u64)>;
 
-    fn get_active_executions<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<Execution>, StorageError>> + Send + 'a>>;
+    fn get_active_executions<'a>(&'a self) -> BoxFuture<'a, Vec<Execution>>;
 }
 
 impl WorkflowStore for Arc<dyn WorkflowStore> {
@@ -56,29 +48,25 @@ impl WorkflowStore for Arc<dyn WorkflowStore> {
         version_id: WorkflowVersionId,
         version: u64,
         definition: &'a WorkflowDefinition,
-    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+    ) -> BoxFuture<'a, ()> {
         (**self).save_definition(workflow_id, name, version_id, version, definition)
     }
 
     fn get_versions<'a>(
         &'a self,
         workflow_id: WorkflowId,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<WorkflowVersionId>, StorageError>> + Send + 'a>>
-    {
+    ) -> BoxFuture<'a, Vec<WorkflowVersionId>> {
         (**self).get_versions(workflow_id)
     }
 
     fn get_definition<'a>(
         &'a self,
         version_id: WorkflowVersionId,
-    ) -> Pin<Box<dyn Future<Output = Result<WorkflowDefinition, StorageError>> + Send + 'a>> {
+    ) -> BoxFuture<'a, WorkflowDefinition> {
         (**self).get_definition(version_id)
     }
 
-    fn save_execution<'a>(
-        &'a self,
-        execution: &'a Execution,
-    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+    fn save_execution<'a>(&'a self, execution: &'a Execution) -> BoxFuture<'a, ()> {
         (**self).save_execution(execution)
     }
 
@@ -86,20 +74,15 @@ impl WorkflowStore for Arc<dyn WorkflowStore> {
         &'a self,
         execution: &'a Execution,
         expected_version: u64,
-    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+    ) -> BoxFuture<'a, ()> {
         (**self).update_execution(execution, expected_version)
     }
 
-    fn get_execution<'a>(
-        &'a self,
-        execution_id: ExecutionId,
-    ) -> Pin<Box<dyn Future<Output = Result<(Execution, u64), StorageError>> + Send + 'a>> {
+    fn get_execution<'a>(&'a self, execution_id: ExecutionId) -> BoxFuture<'a, (Execution, u64)> {
         (**self).get_execution(execution_id)
     }
 
-    fn get_active_executions<'a>(
-        &'a self,
-    ) -> Pin<Box<dyn Future<Output = Result<Vec<Execution>, StorageError>> + Send + 'a>> {
+    fn get_active_executions<'a>(&'a self) -> BoxFuture<'a, Vec<Execution>> {
         (**self).get_active_executions()
     }
 }

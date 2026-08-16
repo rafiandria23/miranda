@@ -23,9 +23,12 @@
 ## 🦀 Rust Quality Checklist
 <!-- Ensure these steps are complete before requesting a review to save CI time. -->
 - [ ] Formatted code: `cargo fmt --all`
-- [ ] Passed lints: `cargo clippy --all-targets --all-features -- -D warnings`
-- [ ] Passed tests: `cargo test`
+- [ ] Passed lints: `cargo clippy --workspace --all-targets --all-features -- -D warnings`
+- [ ] Passed tests: `cargo test --workspace --all-features`
+- [ ] If storage code changed: migrations run and offline query cache is in sync (`make db-migrate-all` then `cargo sqlx prepare --check` in the affected `storage-*` crate)
 - [ ] Added or updated documentation (if applicable)
+
+<!-- CI also runs SonarCloud and Codecov automatically on this PR — no local action needed for those. -->
 
 ## 🛠️ Type of Change
 

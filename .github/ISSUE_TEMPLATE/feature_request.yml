@@ -1,0 +1,41 @@
+name: ✨ Feature request
+description: Suggest an idea or improvement for Miranda
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Before filing, please skim `MIRANDA_ROADMAP.md` — your idea may
+        already be tracked there as planned work.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: What are you trying to do that Miranda doesn't support today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How would you like this to work? Include API/CLI/config shape if relevant.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Any workarounds you're using today, or other approaches you considered.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope
+      options:
+        - label: I checked `MIRANDA_ROADMAP.md` and this isn't already planned
+        - label: This would require a breaking change

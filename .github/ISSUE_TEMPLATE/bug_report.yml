@@ -1,0 +1,89 @@
+name: 🐛 Bug report
+description: Something isn't working as expected
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to report a bug. Please fill out as much
+        of this as you can — cross-backend and distributed-mode issues are
+        especially hard to track down without a precise repro.
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug.
+      placeholder: What did you expect to happen, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal steps, workflow YAML, or commands that trigger the bug.
+      placeholder: |
+        1. Run `miranda-server --control-plane --worker --database-url ...`
+        2. Submit workflow.yaml with ...
+        3. Observe ...
+      render: shell
+    validations:
+      required: true
+
+  - type: dropdown
+    id: mode
+    attributes:
+      label: Mode
+      options:
+        - Embedded (miranda-cli run)
+        - Distributed - single control plane
+        - Distributed - high availability (multiple control planes)
+        - Not sure
+    validations:
+      required: true
+
+  - type: dropdown
+    id: backend
+    attributes:
+      label: Storage backend
+      options:
+        - SQLite
+        - Postgres
+        - MySQL
+        - Not applicable
+        - Not sure
+    validations:
+      required: true
+
+  - type: input
+    id: miranda-version
+    attributes:
+      label: Miranda version / commit
+      placeholder: e.g. v0.1.0, or commit SHA if built from source
+    validations:
+      required: true
+
+  - type: input
+    id: rust-version
+    attributes:
+      label: Rust version
+      placeholder: output of `rustc --version`
+    validations:
+      required: false
+
+  - type: input
+    id: os
+    attributes:
+      label: OS / platform
+      placeholder: e.g. Ubuntu 24.04, macOS 15
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or error output
+      render: shell
+    validations:
+      required: false

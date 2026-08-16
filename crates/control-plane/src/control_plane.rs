@@ -470,3 +470,255 @@ where
             .map_err(ControlPlaneError::from)
     }
 }
+
+// =========================================================================
+// Testing
+// =========================================================================
+
+#[cfg(test)]
+mod tests {
+    use miranda_core::{execution::ExecutionStatus, id::WorkflowId, workflow::WorkflowTask};
+    use miranda_storage::InMemoryStore;
+
+    use crate::{
+        dispatcher::RoutedDispatcher, notifier::NullTaskNotifier, queue::InMemoryTaskQueue,
+        router::InMemoryRouter,
+    };
+
+    use super::*;
+
+    type TestControlPlane = ControlPlane<
+        InMemoryTaskQueue,
+        InMemoryRouter,
+        InMemoryStore,
+        RoutedDispatcher<InMemoryTaskQueue, InMemoryRouter>,
+        NullTaskNotifier,
+        InMemoryStore,
+    >;
+
+    fn control_plane() -> TestControlPlane {
+        let queue = InMemoryTaskQueue::new();
+        let router = InMemoryRouter::new();
+        let store = InMemoryStore::new();
+        let dispatch = RoutedDispatcher::new(queue.clone(), router.clone());
+        let leases = LeaseManager::new(InMemoryStore::new());
+
+        ControlPlane::new(queue, router, store, dispatch, NullTaskNotifier, leases)
+    }
+
+    fn definition_with_task(task_type: &str) -> (WorkflowDefinition, WorkflowTaskId) {
+        let task = WorkflowTask::new(WorkflowTaskId::new(), task_type.to_string(), Vec::new())
+            .expect("valid task");
+        let task_id = task.id();
+        let definition = WorkflowDefinition::new(vec![task]).expect("valid definition");
+
+        (definition, task_id)
+    }
+
+    #[tokio::test]
+    async fn register_workflow_persists_the_first_version() {
+        let control_plane = control_plane();
+        let (definition, _) = definition_with_task("send_email");
+        let workflow_id = WorkflowId::new();
+
+        let version_id = control_plane
+            .register_workflow(workflow_id, "wf", &definition)
+            .await
+            .expect("register succeeds");
+
+        let fetched = control_plane
+            .get_definition(version_id)
+            .await
+            .expect("get_definition succeeds");
+
+        assert_eq!(fetched, definition);
+    }
+
+    #[tokio::test]
+    async fn poll_task_returns_none_when_nothing_is_queued() {
+        let control_plane = control_plane();
+
+        let result = control_plane
+            .poll_task(WorkerId::new())
+            .await
+            .expect("poll succeeds");
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn submit_execution_then_poll_task_dispatches_the_ready_task_to_a_capable_worker() {
+        let control_plane = control_plane();
+        let (definition, task_id) = definition_with_task("send_email");
+        let workflow_id = WorkflowId::new();
+
+        let version_id = control_plane
+            .register_workflow(workflow_id, "wf", &definition)
+            .await
+            .expect("register succeeds");
+
+        let execution =
+            Execution::from_definition(version_id, &definition).expect("valid execution");
+        let execution_id = execution.id();
+
+        control_plane
+            .submit_execution(execution, definition)
+            .await
+            .expect("submit succeeds");
+
+        let worker_id = WorkerId::new();
+        control_plane
+            .register_worker(worker_id, vec!["send_email".to_string()])
+            .await
+            .expect("register_worker succeeds");
+
+        let assignment = control_plane
+            .poll_task(worker_id)
+            .await
+            .expect("poll succeeds")
+            .expect("task is assigned");
+
+        assert_eq!(assignment.task.id(), task_id);
+
+        let (execution, _) = control_plane
+            .get_execution(execution_id)
+            .await
+            .expect("get_execution succeeds");
+
+        assert_eq!(
+            execution.task(task_id).expect("task present").status(),
+            TaskStatus::Running
+        );
+    }
+
+    #[tokio::test]
+    async fn report_result_completing_the_only_task_completes_the_execution() {
+        let control_plane = control_plane();
+        let (definition, task_id) = definition_with_task("send_email");
+        let workflow_id = WorkflowId::new();
+
+        let version_id = control_plane
+            .register_workflow(workflow_id, "wf", &definition)
+            .await
+            .expect("register succeeds");
+
+        let execution =
+            Execution::from_definition(version_id, &definition).expect("valid execution");
+        let execution_id = execution.id();
+
+        control_plane
+            .submit_execution(execution, definition)
+            .await
+            .expect("submit succeeds");
+
+        let worker_id = WorkerId::new();
+        control_plane
+            .register_worker(worker_id, vec!["send_email".to_string()])
+            .await
+            .expect("register_worker succeeds");
+
+        let assignment = control_plane
+            .poll_task(worker_id)
+            .await
+            .expect("poll succeeds")
+            .expect("task is assigned");
+
+        control_plane
+            .report_result(worker_id, assignment.lease_token, Ok(()))
+            .await
+            .expect("report_result succeeds");
+
+        let (execution, _) = control_plane
+            .get_execution(execution_id)
+            .await
+            .expect("get_execution succeeds");
+
+        assert_eq!(
+            execution.task(task_id).expect("task present").status(),
+            TaskStatus::Completed
+        );
+        assert_eq!(execution.status(), ExecutionStatus::Completed);
+    }
+
+    #[tokio::test]
+    async fn heartbeat_touches_the_worker_so_it_is_not_reaped() {
+        let control_plane = control_plane();
+        let worker_id = WorkerId::new();
+
+        control_plane
+            .register_worker(worker_id, vec!["send_email".to_string()])
+            .await
+            .expect("register_worker succeeds");
+
+        control_plane
+            .heartbeat(worker_id, &[])
+            .await
+            .expect("heartbeat succeeds");
+
+        let reaped = control_plane
+            .reap_stale_workers()
+            .await
+            .expect("reap succeeds");
+
+        assert_eq!(reaped, 0);
+    }
+
+    #[tokio::test]
+    async fn deregister_worker_prevents_future_dispatch_to_it() {
+        let control_plane = control_plane();
+        let worker_id = WorkerId::new();
+
+        control_plane
+            .register_worker(worker_id, vec!["send_email".to_string()])
+            .await
+            .expect("register_worker succeeds");
+
+        control_plane
+            .deregister_worker(worker_id)
+            .await
+            .expect("deregister_worker succeeds");
+
+        let (definition, _) = definition_with_task("send_email");
+        let workflow_id = WorkflowId::new();
+        let version_id = control_plane
+            .register_workflow(workflow_id, "wf", &definition)
+            .await
+            .expect("register succeeds");
+        let execution =
+            Execution::from_definition(version_id, &definition).expect("valid execution");
+
+        control_plane
+            .submit_execution(execution, definition)
+            .await
+            .expect("submit succeeds");
+
+        let result = control_plane
+            .poll_task(worker_id)
+            .await
+            .expect("poll succeeds");
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn validate_join_token_allows_any_token_when_no_store_is_configured() {
+        let control_plane = control_plane();
+
+        control_plane
+            .validate_join_token("anything")
+            .await
+            .expect("validation succeeds without a configured store");
+    }
+
+    #[tokio::test]
+    async fn reap_expired_leases_returns_zero_when_no_leases_exist() {
+        let control_plane = control_plane();
+
+        let recovered = control_plane
+            .reap_expired_leases()
+            .await
+            .expect("reap succeeds");
+
+        assert_eq!(recovered, 0);
+    }
+}

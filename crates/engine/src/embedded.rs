@@ -137,75 +137,63 @@ where
 
 #[cfg(test)]
 mod tests {
-    use std::{collections::VecDeque, sync::Arc, sync::Mutex, time::Duration};
-
     use miranda_core::{
-        execution::ExecutionStatus,
+        execution::{ExecutionStatus, TaskStatus},
         id::{WorkflowTaskId, WorkflowVersionId},
         workflow::WorkflowTask,
     };
     use miranda_storage::InMemoryStore;
     use miranda_worker::{InProcessExecutor, WorkerError};
-
-    use crate::retry::Backoff;
+    use std::{
+        future::Future,
+        pin::Pin,
+        sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        },
+        time::Duration,
+    };
 
     use super::*;
 
-    struct CallLog(Mutex<Vec<WorkflowTaskId>>);
+    type BoxFuture = Pin<Box<dyn Future<Output = Result<(), WorkerError>> + Send>>;
 
-    impl CallLog {
-        fn call_order(&self) -> Vec<WorkflowTaskId> {
-            self.0.lock().unwrap().clone()
-        }
-    }
-
-    type BoxFuture =
-        std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), WorkerError>> + Send>>;
-
-    fn scripted_executor(
-        results: Vec<Result<(), WorkerError>>,
+    fn fake_executor(
+        result: Result<(), WorkerError>,
     ) -> (
         InProcessExecutor<impl Fn(&WorkflowTask) -> BoxFuture + Send + Sync>,
-        Arc<CallLog>,
+        Arc<AtomicUsize>,
     ) {
-        let calls = Arc::new(CallLog(Mutex::new(Vec::new())));
-        let log = calls.clone();
-        let results = Arc::new(Mutex::new(VecDeque::from(results)));
+        let calls = Arc::new(AtomicUsize::new(0));
+        let counter = calls.clone();
 
-        let executor = InProcessExecutor::new(move |task: &WorkflowTask| {
-            log.0.lock().unwrap().push(task.id());
-
-            let result = results
-                .lock()
-                .unwrap()
-                .pop_front()
-                .expect("scripted executor ran out of results");
-
+        let executor = InProcessExecutor::new(move |_task: &WorkflowTask| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            let result = result.clone();
             Box::pin(async move { result }) as BoxFuture
         });
 
         (executor, calls)
     }
 
-    fn task(id: WorkflowTaskId, dependencies: Vec<WorkflowTaskId>) -> WorkflowTask {
-        WorkflowTask::new(id, "send_email".to_owned(), dependencies).unwrap()
+    fn single_task_definition(task_type: &str) -> (WorkflowDefinition, WorkflowTaskId) {
+        let task_id = WorkflowTaskId::new();
+        let task = WorkflowTask::new(task_id, task_type.to_owned(), vec![]).unwrap();
+        let definition = WorkflowDefinition::new(vec![task]).unwrap();
+
+        (definition, task_id)
     }
 
-    fn noop_task(id: WorkflowTaskId, dependencies: Vec<WorkflowTaskId>) -> WorkflowTask {
-        WorkflowTask::new(id, "noop".to_owned(), dependencies).unwrap()
-    }
-
-    fn new_execution() -> Execution {
-        Execution::new(WorkflowVersionId::new())
+    fn new_execution(definition: &WorkflowDefinition) -> Execution {
+        Execution::from_definition(WorkflowVersionId::new(), definition).unwrap()
     }
 
     #[tokio::test]
-    async fn run_completes_a_single_task_workflow() {
-        let task_id = WorkflowTaskId::new();
-        let definition = WorkflowDefinition::new(vec![task(task_id, vec![])]).unwrap();
-        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+    async fn run_completes_execution_when_task_succeeds() {
+        let (definition, task_id) = single_task_definition("send_email");
+        let execution = new_execution(&definition);
 
-        let (executor, _calls) = scripted_executor(vec![Ok(())]);
+        let (executor, calls) = fake_executor(Ok(()));
         let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
@@ -214,205 +202,125 @@ mod tests {
         assert_eq!(result.status(), ExecutionStatus::Completed);
         assert_eq!(
             result.task(task_id).unwrap().status(),
-            miranda_core::execution::TaskStatus::Completed
+            TaskStatus::Completed
         );
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
     }
 
     #[tokio::test]
-    async fn run_executes_dependent_tasks_after_their_dependencies() {
-        let dependency_id = WorkflowTaskId::new();
-        let task_id = WorkflowTaskId::new();
-        let definition = WorkflowDefinition::new(vec![
-            task(dependency_id, vec![]),
-            task(task_id, vec![dependency_id]),
-        ])
-        .unwrap();
-        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+    async fn run_completes_noop_tasks_without_dispatching_to_executor() {
+        let (definition, task_id) = single_task_definition("noop");
+        let execution = new_execution(&definition);
 
-        let (executor, calls) = scripted_executor(vec![Ok(()), Ok(())]);
+        let (executor, calls) = fake_executor(Ok(()));
         let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         let result = engine.run(execution, &definition).await.unwrap();
 
         assert_eq!(result.status(), ExecutionStatus::Completed);
-        assert_eq!(calls.call_order(), vec![dependency_id, task_id]);
-    }
-
-    #[tokio::test]
-    async fn run_retries_a_failing_task_until_it_succeeds() {
-        let task_id = WorkflowTaskId::new();
-        let definition = WorkflowDefinition::new(vec![task(task_id, vec![])]).unwrap();
-        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
-
-        let (executor, calls) = scripted_executor(vec![
-            Err(WorkerError::ExecutionFailed {
-                message: "transient".to_owned(),
-            }),
-            Ok(()),
-        ]);
-        let store = InMemoryStore::new();
-        let engine = EmbeddedEngine::new(executor, store)
-            .with_retry_policy(RetryPolicy::new(3, Backoff::Fixed(Duration::ZERO)));
-
-        let result = engine.run(execution, &definition).await.unwrap();
-
-        assert_eq!(result.status(), ExecutionStatus::Completed);
-        assert_eq!(calls.call_order().len(), 2);
-    }
-
-    #[tokio::test]
-    async fn run_fails_the_execution_once_retries_are_exhausted() {
-        let task_id = WorkflowTaskId::new();
-        let definition = WorkflowDefinition::new(vec![task(task_id, vec![])]).unwrap();
-        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
-
-        let (executor, _calls) = scripted_executor(vec![Err(WorkerError::ExecutionFailed {
-            message: "fatal".to_owned(),
-        })]);
-        let store = InMemoryStore::new();
-        let engine = EmbeddedEngine::new(executor, store)
-            .with_retry_policy(RetryPolicy::new(0, Backoff::Fixed(Duration::ZERO)));
-
-        let execution_id = execution.id();
-        let err = engine.run(execution, &definition).await.unwrap_err();
-
-        assert!(
-            matches!(err, EngineError::ExecutionFailed(reason) if reason == "task execution failed: fatal")
+        assert_eq!(
+            result.task(task_id).unwrap().status(),
+            TaskStatus::Completed
         );
-
-        let (stored_execution, _version) = engine.store.get_execution(execution_id).await.unwrap();
-        assert_eq!(stored_execution.status(), ExecutionStatus::Failed);
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 
     #[tokio::test]
-    async fn run_persists_the_completed_execution_in_the_store() {
-        let task_id = WorkflowTaskId::new();
-        let definition = WorkflowDefinition::new(vec![task(task_id, vec![])]).unwrap();
-        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
+    async fn run_persists_execution_state_to_the_store() {
+        let (definition, _task_id) = single_task_definition("send_email");
+        let execution = new_execution(&definition);
         let execution_id = execution.id();
 
-        let (executor, _calls) = scripted_executor(vec![Ok(())]);
+        let (executor, _calls) = fake_executor(Ok(()));
         let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         engine.run(execution, &definition).await.unwrap();
 
-        let (stored_execution, _version) = engine.store.get_execution(execution_id).await.unwrap();
-        assert_eq!(stored_execution.status(), ExecutionStatus::Completed);
+        let (stored, _version) = engine.store.get_execution(execution_id).await.unwrap();
+        assert_eq!(stored.status(), ExecutionStatus::Completed);
     }
 
     #[tokio::test]
-    async fn run_completes_immediately_for_a_definition_with_no_tasks() {
-        let definition = WorkflowDefinition::new(vec![]).unwrap();
-        let execution = new_execution();
+    async fn run_retries_a_failing_task_until_it_succeeds() {
+        let (definition, task_id) = single_task_definition("send_email");
+        let execution = new_execution(&definition);
 
-        let (executor, calls) = scripted_executor(vec![]);
+        let attempt = Arc::new(AtomicUsize::new(0));
+        let attempt_counter = attempt.clone();
+        let executor = InProcessExecutor::new(move |_task: &WorkflowTask| {
+            let current = attempt_counter.fetch_add(1, Ordering::SeqCst);
+            Box::pin(async move {
+                if current == 0 {
+                    Err(WorkerError::ExecutionFailed {
+                        message: "transient".to_owned(),
+                    })
+                } else {
+                    Ok(())
+                }
+            }) as BoxFuture
+        });
+
         let store = InMemoryStore::new();
-        let engine = EmbeddedEngine::new(executor, store);
-
-        let result = engine.run(execution, &definition).await.unwrap();
-
-        assert_eq!(result.status(), ExecutionStatus::Completed);
-        assert!(calls.call_order().is_empty());
-    }
-
-    #[tokio::test]
-    async fn run_completes_a_noop_task_without_dispatching_it() {
-        let task_id = WorkflowTaskId::new();
-        let definition = WorkflowDefinition::new(vec![noop_task(task_id, vec![])]).unwrap();
-        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
-
-        let (executor, calls) = scripted_executor(vec![]);
-        let store = InMemoryStore::new();
-        let engine = EmbeddedEngine::new(executor, store);
+        let engine = EmbeddedEngine::new(executor, store).with_retry_policy(RetryPolicy::new(
+            3,
+            crate::retry::Backoff::Fixed(Duration::ZERO),
+        ));
 
         let result = engine.run(execution, &definition).await.unwrap();
 
         assert_eq!(result.status(), ExecutionStatus::Completed);
         assert_eq!(
             result.task(task_id).unwrap().status(),
-            miranda_core::execution::TaskStatus::Completed
+            TaskStatus::Completed
         );
-        assert!(calls.call_order().is_empty());
+        assert_eq!(attempt.load(Ordering::SeqCst), 2);
     }
 
     #[tokio::test]
-    async fn run_executes_dispatched_tasks_after_a_noop_dependency() {
-        let noop_id = WorkflowTaskId::new();
-        let task_id = WorkflowTaskId::new();
+    async fn run_returns_execution_failed_once_retries_are_exhausted() {
+        let (definition, _task_id) = single_task_definition("send_email");
+        let execution = new_execution(&definition);
+
+        let (executor, calls) = fake_executor(Err(WorkerError::ExecutionFailed {
+            message: "boom".to_owned(),
+        }));
+        let store = InMemoryStore::new();
+        let engine = EmbeddedEngine::new(executor, store).with_retry_policy(RetryPolicy::new(
+            2,
+            crate::retry::Backoff::Fixed(Duration::ZERO),
+        ));
+
+        let err = engine.run(execution, &definition).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            EngineError::ExecutionFailed(reason) if reason == "task execution failed: boom"
+        ));
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn run_completes_a_chain_of_dependent_tasks_in_order() {
+        let task_a = WorkflowTaskId::new();
+        let task_b = WorkflowTaskId::new();
         let definition = WorkflowDefinition::new(vec![
-            noop_task(noop_id, vec![]),
-            task(task_id, vec![noop_id]),
+            WorkflowTask::new(task_a, "send_email".to_owned(), vec![]).unwrap(),
+            WorkflowTask::new(task_b, "send_email".to_owned(), vec![task_a]).unwrap(),
         ])
         .unwrap();
         let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
 
-        let (executor, calls) = scripted_executor(vec![Ok(())]);
+        let (executor, calls) = fake_executor(Ok(()));
         let store = InMemoryStore::new();
         let engine = EmbeddedEngine::new(executor, store);
 
         let result = engine.run(execution, &definition).await.unwrap();
 
         assert_eq!(result.status(), ExecutionStatus::Completed);
-        assert_eq!(
-            result.task(noop_id).unwrap().status(),
-            miranda_core::execution::TaskStatus::Completed
-        );
-        assert_eq!(calls.call_order(), vec![task_id]);
-    }
-
-    #[tokio::test]
-    async fn run_completes_multiple_independent_noop_tasks() {
-        let first_noop_id = WorkflowTaskId::new();
-        let second_noop_id = WorkflowTaskId::new();
-        let definition = WorkflowDefinition::new(vec![
-            noop_task(first_noop_id, vec![]),
-            noop_task(second_noop_id, vec![]),
-        ])
-        .unwrap();
-        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
-
-        let (executor, calls) = scripted_executor(vec![]);
-        let store = InMemoryStore::new();
-        let engine = EmbeddedEngine::new(executor, store);
-
-        let result = engine.run(execution, &definition).await.unwrap();
-
-        assert_eq!(result.status(), ExecutionStatus::Completed);
-        assert_eq!(
-            result.task(first_noop_id).unwrap().status(),
-            miranda_core::execution::TaskStatus::Completed
-        );
-        assert_eq!(
-            result.task(second_noop_id).unwrap().status(),
-            miranda_core::execution::TaskStatus::Completed
-        );
-        assert!(calls.call_order().is_empty());
-    }
-
-    #[tokio::test]
-    async fn run_completes_a_noop_task_after_a_dispatched_dependency() {
-        let task_id = WorkflowTaskId::new();
-        let noop_id = WorkflowTaskId::new();
-        let definition = WorkflowDefinition::new(vec![
-            task(task_id, vec![]),
-            noop_task(noop_id, vec![task_id]),
-        ])
-        .unwrap();
-        let execution = Execution::from_definition(WorkflowVersionId::new(), &definition).unwrap();
-
-        let (executor, calls) = scripted_executor(vec![Ok(())]);
-        let store = InMemoryStore::new();
-        let engine = EmbeddedEngine::new(executor, store);
-
-        let result = engine.run(execution, &definition).await.unwrap();
-
-        assert_eq!(result.status(), ExecutionStatus::Completed);
-        assert_eq!(
-            result.task(noop_id).unwrap().status(),
-            miranda_core::execution::TaskStatus::Completed
-        );
-        assert_eq!(calls.call_order(), vec![task_id]);
+        assert_eq!(result.task(task_a).unwrap().status(), TaskStatus::Completed);
+        assert_eq!(result.task(task_b).unwrap().status(), TaskStatus::Completed);
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }

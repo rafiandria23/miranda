@@ -1,0 +1,12 @@
+{
+  "db_name": "SQLite",
+  "query": "DELETE FROM control_plane_instances WHERE last_heartbeat < ?1",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "2aa65d9dd20fb162476329ea8246b2e00acad46cabeee853f18b20349cbc49e8"
+}

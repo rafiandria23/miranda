@@ -1,29 +1,59 @@
 use miranda_core::id::ExecutionId;
-use std::future::Future;
+use std::{future::Future, pin::Pin, sync::Arc};
 
-use crate::StorageError;
+use crate::error::StorageError;
+
+type LoadLatestFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Option<(u64, Vec<u8>)>, StorageError>> + Send + 'a>>;
 
 pub trait SnapshotStore: Send + Sync {
-    fn save(
-        &self,
+    fn save<'a>(
+        &'a self,
         execution_id: ExecutionId,
         version: u64,
-        data: &[u8],
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+        data: &'a [u8],
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>>;
 
-    fn load(
-        &self,
+    fn load<'a>(
+        &'a self,
         execution_id: ExecutionId,
         version: u64,
-    ) -> impl Future<Output = Result<Vec<u8>, StorageError>> + Send;
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, StorageError>> + Send + 'a>>;
 
-    fn load_latest(
-        &self,
-        execution_id: ExecutionId,
-    ) -> impl Future<Output = Result<Option<(u64, Vec<u8>)>, StorageError>> + Send;
+    fn load_latest<'a>(&'a self, execution_id: ExecutionId) -> LoadLatestFuture<'a>;
 
-    fn delete(
-        &self,
+    fn delete<'a>(
+        &'a self,
         execution_id: ExecutionId,
-    ) -> impl Future<Output = Result<(), StorageError>> + Send;
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>>;
+}
+
+impl SnapshotStore for Arc<dyn SnapshotStore + '_> {
+    fn save<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+        version: u64,
+        data: &'a [u8],
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        (**self).save(execution_id, version, data)
+    }
+
+    fn load<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+        version: u64,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, StorageError>> + Send + 'a>> {
+        (**self).load(execution_id, version)
+    }
+
+    fn load_latest<'a>(&'a self, execution_id: ExecutionId) -> LoadLatestFuture<'a> {
+        (**self).load_latest(execution_id)
+    }
+
+    fn delete<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        (**self).delete(execution_id)
+    }
 }

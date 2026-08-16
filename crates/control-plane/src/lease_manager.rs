@@ -97,3 +97,219 @@ impl<S: LeaseStore> LeaseManager<S> {
         self.store.reap_expired().await.unwrap_or_default()
     }
 }
+
+// =========================================================================
+// Testing
+// =========================================================================
+
+#[cfg(test)]
+mod tests {
+    use miranda_storage::InMemoryStore;
+
+    use super::*;
+
+    fn manager() -> LeaseManager<InMemoryStore> {
+        LeaseManager::new(InMemoryStore::new())
+    }
+
+    #[tokio::test]
+    async fn create_returns_a_token_that_validates_for_the_same_worker() {
+        let manager = manager();
+        let worker_id = WorkerId::new();
+
+        let token = manager
+            .create(
+                ExecutionId::new(),
+                WorkflowTaskId::new(),
+                worker_id,
+                DEFAULT_LEASE_TTL,
+            )
+            .await
+            .expect("create succeeds");
+
+        let lease = manager
+            .validate(&token, worker_id)
+            .await
+            .expect("validate succeeds");
+
+        assert_eq!(lease.token, token);
+        assert_eq!(lease.worker_id, worker_id);
+    }
+
+    #[tokio::test]
+    async fn validate_fails_for_an_unknown_token() {
+        let manager = manager();
+
+        let result = manager.validate("unknown-token", WorkerId::new()).await;
+
+        assert!(matches!(result, Err(ControlPlaneError::InvalidRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn validate_fails_when_the_lease_has_expired() {
+        let manager = manager();
+        let worker_id = WorkerId::new();
+
+        let token = manager
+            .create(
+                ExecutionId::new(),
+                WorkflowTaskId::new(),
+                worker_id,
+                Duration::seconds(-1),
+            )
+            .await
+            .expect("create succeeds");
+
+        let result = manager.validate(&token, worker_id).await;
+
+        assert!(matches!(result, Err(ControlPlaneError::InvalidRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn validate_fails_when_the_worker_does_not_match() {
+        let manager = manager();
+
+        let token = manager
+            .create(
+                ExecutionId::new(),
+                WorkflowTaskId::new(),
+                WorkerId::new(),
+                DEFAULT_LEASE_TTL,
+            )
+            .await
+            .expect("create succeeds");
+
+        let result = manager.validate(&token, WorkerId::new()).await;
+
+        assert!(matches!(result, Err(ControlPlaneError::InvalidRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn release_removes_the_lease() {
+        let manager = manager();
+        let worker_id = WorkerId::new();
+
+        let token = manager
+            .create(
+                ExecutionId::new(),
+                WorkflowTaskId::new(),
+                worker_id,
+                DEFAULT_LEASE_TTL,
+            )
+            .await
+            .expect("create succeeds");
+
+        manager.release(&token).await.expect("release succeeds");
+
+        let result = manager.validate(&token, worker_id).await;
+
+        assert!(matches!(result, Err(ControlPlaneError::InvalidRequest(_))));
+    }
+
+    #[tokio::test]
+    async fn renew_extends_an_expired_lease_so_it_validates_again() {
+        let manager = manager();
+        let worker_id = WorkerId::new();
+
+        let token = manager
+            .create(
+                ExecutionId::new(),
+                WorkflowTaskId::new(),
+                worker_id,
+                Duration::seconds(-1),
+            )
+            .await
+            .expect("create succeeds");
+
+        manager
+            .renew(&token, DEFAULT_LEASE_TTL)
+            .await
+            .expect("renew succeeds");
+
+        let lease = manager
+            .validate(&token, worker_id)
+            .await
+            .expect("validate succeeds");
+
+        assert_eq!(lease.token, token);
+    }
+
+    #[tokio::test]
+    async fn get_active_leases_returns_only_unexpired_leases_for_the_worker() {
+        let manager = manager();
+        let worker_id = WorkerId::new();
+        let other_worker_id = WorkerId::new();
+
+        let active_token = manager
+            .create(
+                ExecutionId::new(),
+                WorkflowTaskId::new(),
+                worker_id,
+                DEFAULT_LEASE_TTL,
+            )
+            .await
+            .expect("create succeeds");
+
+        manager
+            .create(
+                ExecutionId::new(),
+                WorkflowTaskId::new(),
+                worker_id,
+                Duration::seconds(-1),
+            )
+            .await
+            .expect("create succeeds");
+
+        manager
+            .create(
+                ExecutionId::new(),
+                WorkflowTaskId::new(),
+                other_worker_id,
+                DEFAULT_LEASE_TTL,
+            )
+            .await
+            .expect("create succeeds");
+
+        let active = manager.get_active_leases(worker_id).await;
+
+        assert_eq!(active, vec![active_token]);
+    }
+
+    #[tokio::test]
+    async fn reap_expired_removes_and_returns_only_expired_leases() {
+        let manager = manager();
+        let worker_id = WorkerId::new();
+
+        let expired_token = manager
+            .create(
+                ExecutionId::new(),
+                WorkflowTaskId::new(),
+                worker_id,
+                Duration::seconds(-1),
+            )
+            .await
+            .expect("create succeeds");
+
+        let active_token = manager
+            .create(
+                ExecutionId::new(),
+                WorkflowTaskId::new(),
+                worker_id,
+                DEFAULT_LEASE_TTL,
+            )
+            .await
+            .expect("create succeeds");
+
+        let reaped = manager.reap_expired().await;
+
+        assert_eq!(reaped.len(), 1);
+        assert_eq!(reaped[0].token, expired_token);
+
+        let lease = manager
+            .validate(&active_token, worker_id)
+            .await
+            .expect("validate succeeds");
+
+        assert_eq!(lease.token, active_token);
+    }
+}

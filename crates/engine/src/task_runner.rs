@@ -159,8 +159,8 @@ impl<'a> TaskOutcome<'a> {
 #[cfg(test)]
 mod tests {
     use miranda_core::{
-        error::ExecutionError, execution::ExecutionStatus, id::WorkflowVersionId,
-        workflow::WorkflowTask,
+        execution::ExecutionStatus,
+        id::{WorkflowTaskId, WorkflowVersionId},
     };
     use miranda_worker::InProcessExecutor;
     use std::{
@@ -173,344 +173,346 @@ mod tests {
         time::Duration,
     };
 
-    use crate::retry::Backoff;
-
     use super::*;
+
+    type BoxFuture = Pin<Box<dyn Future<Output = Result<(), WorkerError>> + Send>>;
 
     fn fake_executor(
         result: Result<(), WorkerError>,
     ) -> (
-        InProcessExecutor<impl Fn(&WorkflowTask) -> BoxFuture + Send + Sync>,
+        InProcessExecutor<
+            impl Fn(&miranda_core::workflow::WorkflowTask) -> BoxFuture + Send + Sync,
+        >,
         Arc<AtomicUsize>,
     ) {
         let calls = Arc::new(AtomicUsize::new(0));
         let counter = calls.clone();
 
-        let executor = InProcessExecutor::new(move |_task: &WorkflowTask| {
-            counter.fetch_add(1, Ordering::SeqCst);
-            let result = result.clone();
-            Box::pin(async move { result }) as BoxFuture
-        });
+        let executor =
+            InProcessExecutor::new(move |_task: &miranda_core::workflow::WorkflowTask| {
+                counter.fetch_add(1, Ordering::SeqCst);
+                let result = result.clone();
+                Box::pin(async move { result }) as BoxFuture
+            });
 
         (executor, calls)
     }
 
-    type BoxFuture = Pin<Box<dyn Future<Output = Result<(), WorkerError>> + Send>>;
-
-    fn single_task_definition() -> (WorkflowDefinition, WorkflowTaskId) {
+    fn single_task_definition(task_type: &str) -> (WorkflowDefinition, WorkflowTaskId) {
         let task_id = WorkflowTaskId::new();
-        let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
+        let task = miranda_core::workflow::WorkflowTask::new(task_id, task_type.to_owned(), vec![])
+            .unwrap();
         let definition = WorkflowDefinition::new(vec![task]).unwrap();
 
         (definition, task_id)
     }
 
-    fn running_execution(definition: &WorkflowDefinition) -> Execution {
-        let mut execution =
-            Execution::from_definition(WorkflowVersionId::new(), definition).unwrap();
-        execution.start().unwrap();
+    fn new_execution(definition: &WorkflowDefinition) -> Execution {
+        Execution::from_definition(WorkflowVersionId::new(), definition).unwrap()
+    }
+
+    // ---------------------------------------------------------------
+    // TaskDispatcher::dispatch
+    // ---------------------------------------------------------------
+
+    #[tokio::test]
+    async fn dispatch_errors_for_unknown_task() {
+        let (definition, _task_id) = single_task_definition("send_email");
+        let mut execution = new_execution(&definition);
+        execution
+            .apply(
+                Event::new(execution.id(), EventPayload::ExecutionStarted),
+                &definition,
+            )
+            .unwrap();
+
+        let (executor, _calls) = fake_executor(Ok(()));
+        let dispatcher = TaskDispatcher::new(&executor);
+
+        let unknown_id = WorkflowTaskId::new();
+        let err = dispatcher
+            .dispatch(&mut execution, &definition, unknown_id)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            EngineError::Domain(ExecutionError::UnknownTask(id)) if id == unknown_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn dispatch_errors_when_task_is_not_pending_or_failed() {
+        let (definition, task_id) = single_task_definition("send_email");
+        let mut execution = new_execution(&definition);
+        execution
+            .apply(
+                Event::new(execution.id(), EventPayload::ExecutionStarted),
+                &definition,
+            )
+            .unwrap();
+        execution
+            .apply(
+                Event::new(
+                    execution.id(),
+                    EventPayload::TaskStarted {
+                        workflow_task_id: task_id,
+                    },
+                ),
+                &definition,
+            )
+            .unwrap();
+
+        let (executor, _calls) = fake_executor(Ok(()));
+        let dispatcher = TaskDispatcher::new(&executor);
+
+        let err = dispatcher
+            .dispatch(&mut execution, &definition, task_id)
+            .await
+            .unwrap_err();
+
+        assert!(matches!(
+            err,
+            EngineError::Domain(ExecutionError::TaskNotReady(id)) if id == task_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn dispatch_starts_a_pending_task_and_invokes_the_executor() {
+        let (definition, task_id) = single_task_definition("send_email");
+        let mut execution = new_execution(&definition);
+        execution
+            .apply(
+                Event::new(execution.id(), EventPayload::ExecutionStarted),
+                &definition,
+            )
+            .unwrap();
+
+        let (executor, calls) = fake_executor(Ok(()));
+        let dispatcher = TaskDispatcher::new(&executor);
+
+        let result = dispatcher
+            .dispatch(&mut execution, &definition, task_id)
+            .await
+            .unwrap();
+
+        assert!(result.is_ok());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            execution.task(task_id).unwrap().status(),
+            TaskStatus::Running
+        );
+    }
+
+    #[tokio::test]
+    async fn dispatch_restarts_a_failed_task_and_invokes_the_executor() {
+        let (definition, task_id) = single_task_definition("send_email");
+        let mut execution = new_execution(&definition);
+        execution
+            .apply(
+                Event::new(execution.id(), EventPayload::ExecutionStarted),
+                &definition,
+            )
+            .unwrap();
+        execution
+            .apply(
+                Event::new(
+                    execution.id(),
+                    EventPayload::TaskStarted {
+                        workflow_task_id: task_id,
+                    },
+                ),
+                &definition,
+            )
+            .unwrap();
+        execution
+            .apply(
+                Event::new(
+                    execution.id(),
+                    EventPayload::TaskFailed {
+                        workflow_task_id: task_id,
+                        reason: "boom".to_owned(),
+                        will_retry: true,
+                    },
+                ),
+                &definition,
+            )
+            .unwrap();
+
+        let (executor, calls) = fake_executor(Ok(()));
+        let dispatcher = TaskDispatcher::new(&executor);
+
+        let result = dispatcher
+            .dispatch(&mut execution, &definition, task_id)
+            .await
+            .unwrap();
+
+        assert!(result.is_ok());
+        assert_eq!(calls.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            execution.task(task_id).unwrap().status(),
+            TaskStatus::Running
+        );
+        assert_eq!(execution.task(task_id).unwrap().attempts().len(), 2);
+    }
+
+    #[tokio::test]
+    async fn dispatch_propagates_the_executor_failure() {
+        let (definition, task_id) = single_task_definition("send_email");
+        let mut execution = new_execution(&definition);
+        execution
+            .apply(
+                Event::new(execution.id(), EventPayload::ExecutionStarted),
+                &definition,
+            )
+            .unwrap();
+
+        let (executor, _calls) = fake_executor(Err(WorkerError::ExecutionFailed {
+            message: "boom".to_owned(),
+        }));
+        let dispatcher = TaskDispatcher::new(&executor);
+
+        let result = dispatcher
+            .dispatch(&mut execution, &definition, task_id)
+            .await
+            .unwrap();
+
+        assert!(matches!(
+            result,
+            Err(WorkerError::ExecutionFailed { message }) if message == "boom"
+        ));
+    }
+
+    // ---------------------------------------------------------------
+    // TaskOutcome::apply
+    // ---------------------------------------------------------------
+
+    fn running_execution_with_started_task(
+        definition: &WorkflowDefinition,
+        task_id: WorkflowTaskId,
+    ) -> Execution {
+        let mut execution = new_execution(definition);
+        execution
+            .apply(
+                Event::new(execution.id(), EventPayload::ExecutionStarted),
+                definition,
+            )
+            .unwrap();
+        execution
+            .apply(
+                Event::new(
+                    execution.id(),
+                    EventPayload::TaskStarted {
+                        workflow_task_id: task_id,
+                    },
+                ),
+                definition,
+            )
+            .unwrap();
 
         execution
     }
 
-    mod task_dispatcher {
-        use super::*;
+    #[tokio::test]
+    async fn apply_marks_task_completed_on_success() {
+        let (definition, task_id) = single_task_definition("send_email");
+        let mut execution = running_execution_with_started_task(&definition, task_id);
 
-        #[tokio::test]
-        async fn dispatch_starts_a_pending_task_and_invokes_executor() {
-            let (definition, task_id) = single_task_definition();
-            let mut execution = running_execution(&definition);
+        let retry_policy = RetryPolicy::new(3, crate::retry::Backoff::Fixed(Duration::ZERO));
+        let outcome = TaskOutcome::new(&retry_policy);
 
-            let (executor, _calls) = fake_executor(Ok(()));
-            let dispatcher = TaskDispatcher::new(&executor);
+        let result = outcome
+            .apply(&mut execution, &definition, task_id, Ok(()))
+            .await
+            .unwrap();
 
-            let result = dispatcher
-                .dispatch(&mut execution, &definition, task_id)
-                .await
-                .unwrap();
-
-            assert!(result.is_ok());
-            assert_eq!(
-                execution.task(task_id).unwrap().status(),
-                TaskStatus::Running
-            );
-        }
-
-        #[tokio::test]
-        async fn dispatch_retries_a_failed_task() {
-            let (definition, task_id) = single_task_definition();
-            let mut execution = running_execution(&definition);
-            execution.start_task(task_id, &definition).unwrap();
-            execution.fail_task(task_id).unwrap();
-
-            let (executor, _calls) = fake_executor(Ok(()));
-            let dispatcher = TaskDispatcher::new(&executor);
-
-            let result = dispatcher
-                .dispatch(&mut execution, &definition, task_id)
-                .await
-                .unwrap();
-
-            assert!(result.is_ok());
-            assert_eq!(
-                execution.task(task_id).unwrap().status(),
-                TaskStatus::Running
-            );
-        }
-
-        #[tokio::test]
-        async fn dispatch_passes_through_executor_error() {
-            let (definition, task_id) = single_task_definition();
-            let mut execution = running_execution(&definition);
-
-            let (executor, _calls) = fake_executor(Err(WorkerError::ExecutionFailed {
-                message: "boom".to_owned(),
-            }));
-            let dispatcher = TaskDispatcher::new(&executor);
-
-            let result = dispatcher
-                .dispatch(&mut execution, &definition, task_id)
-                .await
-                .unwrap();
-
-            assert_eq!(
-                result,
-                Err(WorkerError::ExecutionFailed {
-                    message: "boom".to_owned(),
-                })
-            );
-        }
-
-        #[tokio::test]
-        async fn dispatch_rejects_an_unknown_task() {
-            let (definition, _task_id) = single_task_definition();
-            let mut execution = running_execution(&definition);
-
-            let unknown_id = WorkflowTaskId::new();
-            let (executor, _calls) = fake_executor(Ok(()));
-            let dispatcher = TaskDispatcher::new(&executor);
-
-            let err = dispatcher
-                .dispatch(&mut execution, &definition, unknown_id)
-                .await
-                .unwrap_err();
-
-            assert!(matches!(
-                err,
-                EngineError::Domain(ExecutionError::UnknownTask(id)) if id == unknown_id
-            ));
-        }
-
-        #[tokio::test]
-        async fn dispatch_rejects_a_task_that_is_already_running() {
-            let (definition, task_id) = single_task_definition();
-            let mut execution = running_execution(&definition);
-            execution.start_task(task_id, &definition).unwrap();
-
-            let (executor, _calls) = fake_executor(Ok(()));
-            let dispatcher = TaskDispatcher::new(&executor);
-
-            let err = dispatcher
-                .dispatch(&mut execution, &definition, task_id)
-                .await
-                .unwrap_err();
-
-            assert!(matches!(
-                err,
-                EngineError::Domain(ExecutionError::TaskNotReady(id)) if id == task_id
-            ));
-        }
-
-        #[tokio::test]
-        async fn dispatch_rejects_a_completed_task() {
-            let (definition, task_id) = single_task_definition();
-            let mut execution = running_execution(&definition);
-            execution.start_task(task_id, &definition).unwrap();
-            execution.complete_task(task_id).unwrap();
-
-            let (executor, _calls) = fake_executor(Ok(()));
-            let dispatcher = TaskDispatcher::new(&executor);
-
-            let err = dispatcher
-                .dispatch(&mut execution, &definition, task_id)
-                .await
-                .unwrap_err();
-
-            assert!(matches!(
-                err,
-                EngineError::Domain(ExecutionError::TaskNotReady(id)) if id == task_id
-            ));
-        }
+        assert_eq!(result, TaskOutcomeResult::Completed);
+        assert_eq!(
+            execution.task(task_id).unwrap().status(),
+            TaskStatus::Completed
+        );
     }
 
-    mod task_outcome {
-        use super::*;
+    #[tokio::test]
+    async fn apply_retries_a_failure_when_attempts_remain() {
+        let (definition, task_id) = single_task_definition("send_email");
+        let mut execution = running_execution_with_started_task(&definition, task_id);
 
-        #[tokio::test]
-        async fn apply_marks_task_completed_on_success() {
-            let (definition, task_id) = single_task_definition();
-            let mut execution = running_execution(&definition);
-            execution.start_task(task_id, &definition).unwrap();
+        let retry_policy = RetryPolicy::new(3, crate::retry::Backoff::Fixed(Duration::ZERO));
+        let outcome = TaskOutcome::new(&retry_policy);
 
-            let policy = RetryPolicy::new(3, Backoff::Fixed(Duration::ZERO));
-            let outcome = TaskOutcome::new(&policy);
+        let result = outcome
+            .apply(
+                &mut execution,
+                &definition,
+                task_id,
+                Err(WorkerError::ExecutionFailed {
+                    message: "transient".to_owned(),
+                }),
+            )
+            .await
+            .unwrap();
 
-            let result = outcome
-                .apply(&mut execution, &definition, task_id, Ok(()))
-                .await
-                .unwrap();
+        assert_eq!(result, TaskOutcomeResult::Retried);
+        assert_eq!(
+            execution.task(task_id).unwrap().status(),
+            TaskStatus::Failed
+        );
+        assert_eq!(execution.status(), ExecutionStatus::Running);
+    }
 
-            assert_eq!(result, TaskOutcomeResult::Completed);
-            assert_eq!(
-                execution.task(task_id).unwrap().status(),
-                TaskStatus::Completed
-            );
-        }
+    #[tokio::test]
+    async fn apply_fails_the_execution_once_retries_are_exhausted() {
+        let (definition, task_id) = single_task_definition("send_email");
+        let mut execution = running_execution_with_started_task(&definition, task_id);
 
-        #[tokio::test]
-        async fn apply_retries_a_failure_while_under_max_attempts() {
-            let (definition, task_id) = single_task_definition();
-            let mut execution = running_execution(&definition);
-            execution.start_task(task_id, &definition).unwrap();
+        let retry_policy = RetryPolicy::new(1, crate::retry::Backoff::Fixed(Duration::ZERO));
+        let outcome = TaskOutcome::new(&retry_policy);
 
-            let policy = RetryPolicy::new(3, Backoff::Fixed(Duration::ZERO));
-            let outcome = TaskOutcome::new(&policy);
+        let err = outcome
+            .apply(
+                &mut execution,
+                &definition,
+                task_id,
+                Err(WorkerError::ExecutionFailed {
+                    message: "boom".to_owned(),
+                }),
+            )
+            .await
+            .unwrap_err();
 
-            let error = WorkerError::ExecutionFailed {
-                message: "transient".to_owned(),
-            };
-            let result = outcome
-                .apply(&mut execution, &definition, task_id, Err(error))
-                .await
-                .unwrap();
+        assert!(matches!(
+            err,
+            EngineError::ExecutionFailed(reason) if reason == "task execution failed: boom"
+        ));
+        assert_eq!(
+            execution.task(task_id).unwrap().status(),
+            TaskStatus::Failed
+        );
+        assert_eq!(execution.status(), ExecutionStatus::Failed);
+    }
 
-            assert_eq!(result, TaskOutcomeResult::Retried);
-            assert_eq!(
-                execution.task(task_id).unwrap().status(),
-                TaskStatus::Failed
-            );
-            assert_eq!(execution.status(), ExecutionStatus::Running);
-        }
+    #[tokio::test]
+    async fn apply_never_retries_when_max_attempts_is_zero() {
+        let (definition, task_id) = single_task_definition("send_email");
+        let mut execution = running_execution_with_started_task(&definition, task_id);
 
-        #[tokio::test]
-        async fn apply_fails_execution_once_retries_are_exhausted() {
-            let (definition, task_id) = single_task_definition();
-            let mut execution = running_execution(&definition);
-            execution.start_task(task_id, &definition).unwrap();
+        let retry_policy = RetryPolicy::new(0, crate::retry::Backoff::Fixed(Duration::ZERO));
+        let outcome = TaskOutcome::new(&retry_policy);
 
-            let policy = RetryPolicy::new(0, Backoff::Fixed(Duration::ZERO));
-            let outcome = TaskOutcome::new(&policy);
+        let err = outcome
+            .apply(
+                &mut execution,
+                &definition,
+                task_id,
+                Err(WorkerError::ExecutionFailed {
+                    message: "boom".to_owned(),
+                }),
+            )
+            .await
+            .unwrap_err();
 
-            let error = WorkerError::ExecutionFailed {
-                message: "fatal".to_owned(),
-            };
-            let err = outcome
-                .apply(&mut execution, &definition, task_id, Err(error))
-                .await
-                .unwrap_err();
-
-            assert!(matches!(
-                err,
-                EngineError::ExecutionFailed(reason) if reason == "task execution failed: fatal"
-            ));
-            assert_eq!(
-                execution.task(task_id).unwrap().status(),
-                TaskStatus::Failed
-            );
-            assert_eq!(execution.status(), ExecutionStatus::Failed);
-        }
-
-        #[tokio::test]
-        async fn apply_counts_prior_attempts_when_deciding_to_retry() {
-            let (definition, task_id) = single_task_definition();
-            let mut execution = running_execution(&definition);
-
-            // First attempt: fails and is retried (1 attempt recorded < max_attempts 2).
-            execution.start_task(task_id, &definition).unwrap();
-            let policy = RetryPolicy::new(2, Backoff::Fixed(Duration::ZERO));
-            let outcome = TaskOutcome::new(&policy);
-            let error = WorkerError::ExecutionFailed {
-                message: "first".to_owned(),
-            };
-            let result = outcome
-                .apply(&mut execution, &definition, task_id, Err(error))
-                .await
-                .unwrap();
-            assert_eq!(result, TaskOutcomeResult::Retried);
-
-            // Second attempt: now 2 attempts are recorded, no longer below
-            // max_attempts (2), so the execution is failed instead of retried again.
-            execution.retry_task(task_id, &definition).unwrap();
-            let error = WorkerError::ExecutionFailed {
-                message: "second".to_owned(),
-            };
-            let err = outcome
-                .apply(&mut execution, &definition, task_id, Err(error))
-                .await
-                .unwrap_err();
-
-            assert!(matches!(err, EngineError::ExecutionFailed(_)));
-            assert_eq!(execution.status(), ExecutionStatus::Failed);
-        }
-
-        #[tokio::test]
-        async fn apply_uses_the_configured_delay_before_retrying() {
-            let (definition, task_id) = single_task_definition();
-            let mut execution = running_execution(&definition);
-            execution.start_task(task_id, &definition).unwrap();
-
-            // A zero delay resolves without ever sleeping; this asserts the call
-            // still completes and produces the expected outcome under that policy.
-            let policy = RetryPolicy::new(5, Backoff::Fixed(Duration::ZERO));
-            let outcome = TaskOutcome::new(&policy);
-
-            let error = WorkerError::ExecutionFailed {
-                message: "transient".to_owned(),
-            };
-            let result = outcome
-                .apply(&mut execution, &definition, task_id, Err(error))
-                .await
-                .unwrap();
-
-            assert_eq!(result, TaskOutcomeResult::Retried);
-        }
-
-        #[tokio::test]
-        async fn apply_reports_retry_calls_seen_by_a_shared_counter() {
-            // Sanity check that the executor's call count observes outcomes
-            // applied across sequential dispatch/apply cycles, mirroring how
-            // the runner loop would use these primitives.
-            let (definition, task_id) = single_task_definition();
-            let mut execution = running_execution(&definition);
-
-            let (executor, calls) = fake_executor(Err(WorkerError::ExecutionFailed {
-                message: "always fails".to_owned(),
-            }));
-            let dispatcher = TaskDispatcher::new(&executor);
-            let policy = RetryPolicy::new(2, Backoff::Fixed(Duration::ZERO));
-            let outcome = TaskOutcome::new(&policy);
-
-            let result = dispatcher
-                .dispatch(&mut execution, &definition, task_id)
-                .await
-                .unwrap();
-            let outcome_result = outcome
-                .apply(&mut execution, &definition, task_id, result)
-                .await
-                .unwrap();
-            assert_eq!(outcome_result, TaskOutcomeResult::Retried);
-
-            let result = dispatcher
-                .dispatch(&mut execution, &definition, task_id)
-                .await
-                .unwrap();
-            let err = outcome
-                .apply(&mut execution, &definition, task_id, result)
-                .await
-                .unwrap_err();
-
-            assert!(matches!(err, EngineError::ExecutionFailed(_)));
-            assert_eq!(calls.load(Ordering::SeqCst), 2);
-        }
+        assert!(matches!(err, EngineError::ExecutionFailed(_)));
+        assert_eq!(execution.status(), ExecutionStatus::Failed);
     }
 }

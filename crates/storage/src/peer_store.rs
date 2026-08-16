@@ -31,6 +31,11 @@ pub trait PeerStore: Send + Sync {
         &'a self,
         threshold: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<PeerInfo>, StorageError>> + Send + 'a>>;
+
+    fn reap_stale<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, StorageError>> + Send + 'a>>;
 }
 
 impl PeerStore for Arc<dyn PeerStore + '_> {
@@ -61,5 +66,12 @@ impl PeerStore for Arc<dyn PeerStore + '_> {
         threshold: Duration,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<PeerInfo>, StorageError>> + Send + 'a>> {
         (**self).list_active(threshold)
+    }
+
+    fn reap_stale<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, StorageError>> + Send + 'a>> {
+        (**self).reap_stale(threshold)
     }
 }

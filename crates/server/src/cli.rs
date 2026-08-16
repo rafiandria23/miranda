@@ -24,6 +24,9 @@ pub struct Cli {
     #[arg(long, default_value = "0.0.0.0:8080")]
     pub http_bind: String,
 
+    #[arg(long)]
+    pub advertise_address: Option<String>,
+
     #[arg(long, value_delimiter = ',')]
     pub capabilities: Vec<String>,
 }

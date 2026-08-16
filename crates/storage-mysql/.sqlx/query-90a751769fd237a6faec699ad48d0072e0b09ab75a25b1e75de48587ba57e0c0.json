@@ -1,0 +1,12 @@
+{
+  "db_name": "MySQL",
+  "query": "DELETE FROM control_plane_instances WHERE last_heartbeat < ?",
+  "describe": {
+    "columns": [],
+    "parameters": {
+      "Right": 1
+    },
+    "nullable": []
+  },
+  "hash": "90a751769fd237a6faec699ad48d0072e0b09ab75a25b1e75de48587ba57e0c0"
+}

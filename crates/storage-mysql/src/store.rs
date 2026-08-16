@@ -88,10 +88,10 @@ async fn ensure_database_exists(config: &MySqlConfig) -> Result<(), sqlx::Error>
 }
 
 fn map_insert_error(err: sqlx::Error) -> StorageError {
-    if let sqlx::Error::Database(db_err) = &err {
-        if db_err.is_unique_violation() {
-            return StorageError::Conflict(db_err.to_string());
-        }
+    if let sqlx::Error::Database(db_err) = &err
+        && db_err.is_unique_violation()
+    {
+        return StorageError::Conflict(db_err.to_string());
     }
 
     StorageError::Backend(err.to_string())
@@ -999,6 +999,33 @@ impl PeerStore for MySqlStore {
                     grpc_address: r.grpc_address,
                 })
                 .collect())
+        })
+    }
+
+    fn reap_stale<'a>(
+        &'a self,
+        threshold: Duration,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let cutoff = OffsetDateTime::now_utc() - threshold;
+
+            let rows = sqlx::query!(
+                r#"SELECT id FROM control_plane_instances WHERE last_heartbeat < ?"#,
+                cutoff,
+            )
+            .fetch_all(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            sqlx::query!(
+                r#"DELETE FROM control_plane_instances WHERE last_heartbeat < ?"#,
+                cutoff,
+            )
+            .execute(&self.pool)
+            .await
+            .map_err(|e| StorageError::Backend(e.to_string()))?;
+
+            Ok(rows.into_iter().map(|r| r.id).collect())
         })
     }
 }

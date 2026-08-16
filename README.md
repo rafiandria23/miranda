@@ -1,5 +1,9 @@
 # Miranda
 
+[![CI](https://github.com/rafiandria23/miranda/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rafiandria23/miranda/actions/workflows/ci.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=rafiandria23_miranda&metric=alert_status&branch=main)](https://sonarcloud.io/summary/new_code?id=rafiandria23_miranda&branch=main)
+[![codecov](https://codecov.io/gh/rafiandria23/miranda/branch/main/graph/badge.svg)](https://codecov.io/gh/rafiandria23/miranda)
+
 A Rust-based durable workflow engine. Run task graphs locally with zero
 infrastructure, or scale out to a distributed fleet of workers coordinated by
 a real control plane, backed by Postgres, MySQL, or SQLite.
@@ -73,8 +77,13 @@ token and prints the exact command to connect a worker to it:
 
 ```bash
 # Control plane only. Coordinates workers, exposes gRPC + HTTP APIs.
+# --advertise-address is the address other control-plane instances should
+# dial to reach this one (used for HA, see below) -- required whenever
+# --grpc-bind is an unspecified address like 0.0.0.0, since that's valid
+# to bind to but never valid for a peer to actually dial.
 # Prints: join a worker with: miranda-server --worker --control-plane-url ... --join-token ...
-miranda-server --control-plane --database-url postgres://user:pass@localhost/miranda
+miranda-server --control-plane --database-url postgres://user:pass@localhost/miranda \
+  --advertise-address 127.0.0.1
 
 # Worker only. Connects to a control plane elsewhere. --join-token is required
 # and is checked by the control plane before the worker is allowed to register.
@@ -85,7 +94,8 @@ miranda-server --worker --control-plane-url http://localhost:7433 \
 # Both, co-located in one process. Worker talks to the control plane
 # in-process, no network hop, no token needed for that internal link.
 # The natural shape for a single-node setup.
-miranda-server --control-plane --worker --database-url sqlite:///tmp/miranda.sqlite
+miranda-server --control-plane --worker --database-url sqlite:///tmp/miranda.sqlite \
+  --advertise-address 127.0.0.1
 ```
 
 The join token is persisted in the same database as everything else, so it
@@ -108,12 +118,19 @@ configuration needed, the shared database is the cluster:
 ```bash
 # Instance 1
 miranda-server --control-plane --database-url postgres://user:pass@localhost/miranda \
-  --grpc-bind 0.0.0.0:7433 --http-bind 0.0.0.0:8080
+  --grpc-bind 0.0.0.0:7433 --http-bind 0.0.0.0:8080 --advertise-address 127.0.0.1
 
 # Instance 2, same database, different ports
 miranda-server --control-plane --database-url postgres://user:pass@localhost/miranda \
-  --grpc-bind 0.0.0.0:7434 --http-bind 0.0.0.0:8081
+  --grpc-bind 0.0.0.0:7434 --http-bind 0.0.0.0:8081 --advertise-address 127.0.0.1
 ```
+
+`--advertise-address` defaults to the `--grpc-bind` host, but Miranda refuses to
+start if that resolves to an unspecified address like `0.0.0.0` -- pass it
+explicitly (`127.0.0.1` for same-machine testing, or this instance's real,
+reachable IP/hostname for a genuine multi-machine deployment). This is what
+lets instances find and dial each other; without a real address here, peer
+discovery has nothing valid to connect to.
 
 Both instances stay fully active for worker traffic (task claiming, result
 reporting, workflow submission, all already safe under concurrent access via
@@ -160,17 +177,23 @@ per-task `timeout`, overriding the workflow-level default.
 
 ```
 crates/
-├── core                    # domain model. Execution, WorkflowDefinition, no I/O
-├── worker                  # task execution. ShellExecutor, HttpExecutor, etc.
-├── storage                 # WorkflowStore/TaskQueueStore/RouterStore traits + in-memory impls
-├── storage-postgres        # Postgres implementations
-├── storage-mysql           # MySQL implementations
-├── storage-sqlite          # SQLite implementations
-├── engine                  # embedded-mode orchestration
-├── control-plane           # distributed-mode coordination (leases, queue, routing)
-├── server                  # the miranda-server binary. gRPC + HTTP
-└── cli                     # the miranda-cli binary. run/submit/status/db
+├── core             # domain model, no I/O
+├── worker           # task execution
+├── storage          # storage-primitive traits + in-memory impl
+├── storage-postgres # Postgres implementations
+├── storage-mysql    # MySQL implementations
+├── storage-sqlite   # SQLite implementations
+├── engine           # embedded-mode orchestration
+├── control-plane    # distributed-mode coordination
+├── server           # the miranda-server binary: gRPC + HTTP
+└── cli              # the miranda-cli binary: run/submit/status/db
 ```
+
+See [`crates/README.md`](crates/README.md) for what's actually inside each
+one — file-by-file structure, where a given change belongs, and the
+conventions worth knowing before you dig in. See
+[`proto/README.md`](proto/README.md) for the two gRPC services'
+`.proto` layout.
 
 ## Status
 
