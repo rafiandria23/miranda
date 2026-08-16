@@ -9,14 +9,14 @@ STORAGE_MYSQL_DIR    := crates/storage-mysql
 STORAGE_SQLITE_DIR   := crates/storage-sqlite
 
 # Default DB Connection Parameters (overridable via environment or .env)
-MYSQL_USER        ?= root
-MYSQL_PASSWORD    ?= root
+MYSQL_USER        ?= rafiandria23
+MYSQL_PASSWORD    ?= rafiandria23
 MYSQL_HOST        ?= 127.0.0.1
 MYSQL_PORT        ?= 3306
 MYSQL_DB          ?= miranda
 
-POSTGRES_USER     ?= postgres
-POSTGRES_PASSWORD ?= postgres
+POSTGRES_USER     ?= rafiandria23
+POSTGRES_PASSWORD ?= rafiandria23
 POSTGRES_HOST     ?= 127.0.0.1
 POSTGRES_PORT     ?= 5432
 POSTGRES_DB       ?= miranda
