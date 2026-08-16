@@ -28,7 +28,7 @@
 - [ ] If storage code changed: migrations run and offline query cache is in sync (`make db-migrate-all` then `cargo sqlx prepare --check` in the affected `storage-*` crate)
 - [ ] Added or updated documentation (if applicable)
 
-<!-- CI also runs SonarCloud and Codecov automatically on this PR -- no local action needed for those. -->
+<!-- CI also runs SonarCloud and Codecov automatically on this PR — no local action needed for those. -->
 
 ## 🛠️ Type of Change
 
