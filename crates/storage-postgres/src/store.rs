@@ -88,10 +88,10 @@ async fn ensure_database_exists(config: &PostgresConfig) -> Result<(), sqlx::Err
 }
 
 fn map_insert_error(err: sqlx::Error) -> StorageError {
-    if let sqlx::Error::Database(db_err) = &err {
-        if db_err.is_unique_violation() {
-            return StorageError::Conflict(db_err.to_string());
-        }
+    if let sqlx::Error::Database(db_err) = &err
+        && db_err.is_unique_violation()
+    {
+        return StorageError::Conflict(db_err.to_string());
     }
 
     StorageError::Backend(err.to_string())
@@ -511,7 +511,7 @@ impl WorkflowStore for PostgresStore {
         &'a self,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<Execution>, StorageError>> + Send + 'a>> {
         Box::pin(async move {
-            let active_statuses = vec![
+            let active_statuses = [
                 ExecutionStatus::Pending.as_str().to_string(),
                 ExecutionStatus::Running.as_str().to_string(),
             ];

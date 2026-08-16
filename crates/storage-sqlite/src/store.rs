@@ -47,10 +47,10 @@ impl SqliteStore {
 }
 
 fn map_insert_error(err: sqlx::Error) -> StorageError {
-    if let sqlx::Error::Database(db_err) = &err {
-        if db_err.is_unique_violation() {
-            return StorageError::Conflict(db_err.to_string());
-        }
+    if let sqlx::Error::Database(db_err) = &err
+        && db_err.is_unique_violation()
+    {
+        return StorageError::Conflict(db_err.to_string());
     }
 
     StorageError::Backend(err.to_string())
@@ -1107,18 +1107,11 @@ mod tests {
         let store = test_store().await;
         let id = WorkerId::new();
 
-        let reg = WorkerRegistration::new(
-            id,
-            vec!["email".to_string()],
-            OffsetDateTime::now_utc(),
-        );
+        let reg = WorkerRegistration::new(id, vec!["email".to_string()], OffsetDateTime::now_utc());
         store.register_worker(reg).await.unwrap();
 
-        let updated = WorkerRegistration::new(
-            id,
-            vec!["sms".to_string()],
-            OffsetDateTime::now_utc(),
-        );
+        let updated =
+            WorkerRegistration::new(id, vec!["sms".to_string()], OffsetDateTime::now_utc());
         store.register_worker(updated).await.unwrap();
 
         assert_eq!(store.select_worker("email").await.unwrap(), None);

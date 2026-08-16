@@ -263,8 +263,10 @@ mod tests {
         });
 
         let store = InMemoryStore::new();
-        let engine = EmbeddedEngine::new(executor, store)
-            .with_retry_policy(RetryPolicy::new(3, crate::retry::Backoff::Fixed(Duration::ZERO)));
+        let engine = EmbeddedEngine::new(executor, store).with_retry_policy(RetryPolicy::new(
+            3,
+            crate::retry::Backoff::Fixed(Duration::ZERO),
+        ));
 
         let result = engine.run(execution, &definition).await.unwrap();
 
@@ -285,8 +287,10 @@ mod tests {
             message: "boom".to_owned(),
         }));
         let store = InMemoryStore::new();
-        let engine = EmbeddedEngine::new(executor, store)
-            .with_retry_policy(RetryPolicy::new(2, crate::retry::Backoff::Fixed(Duration::ZERO)));
+        let engine = EmbeddedEngine::new(executor, store).with_retry_policy(RetryPolicy::new(
+            2,
+            crate::retry::Backoff::Fixed(Duration::ZERO),
+        ));
 
         let err = engine.run(execution, &definition).await.unwrap_err();
 
@@ -315,14 +319,8 @@ mod tests {
         let result = engine.run(execution, &definition).await.unwrap();
 
         assert_eq!(result.status(), ExecutionStatus::Completed);
-        assert_eq!(
-            result.task(task_a).unwrap().status(),
-            TaskStatus::Completed
-        );
-        assert_eq!(
-            result.task(task_b).unwrap().status(),
-            TaskStatus::Completed
-        );
+        assert_eq!(result.task(task_a).unwrap().status(), TaskStatus::Completed);
+        assert_eq!(result.task(task_b).unwrap().status(), TaskStatus::Completed);
         assert_eq!(calls.load(Ordering::SeqCst), 2);
     }
 }

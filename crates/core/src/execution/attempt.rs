@@ -57,13 +57,13 @@ impl Attempt {
     }
 
     fn transition_to(&mut self, target: AttemptStatus) -> Result<(), ExecutionError> {
-        let valid = match (self.status, target) {
-            (AttemptStatus::Pending, AttemptStatus::Running) => true,
-            (AttemptStatus::Running, AttemptStatus::Succeeded) => true,
-            (AttemptStatus::Running, AttemptStatus::Failed) => true,
-            (AttemptStatus::Running, AttemptStatus::Cancelled) => true,
-            _ => false,
-        };
+        let valid = matches!(
+            (self.status, target),
+            (AttemptStatus::Pending, AttemptStatus::Running)
+                | (AttemptStatus::Running, AttemptStatus::Succeeded)
+                | (AttemptStatus::Running, AttemptStatus::Failed)
+                | (AttemptStatus::Running, AttemptStatus::Cancelled)
+        );
 
         if !valid {
             return Err(ExecutionError::InvalidAttemptTransition {

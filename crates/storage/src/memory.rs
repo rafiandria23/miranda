@@ -26,9 +26,11 @@ use crate::{
     workflow_store::WorkflowStore,
 };
 
+type DefinitionsMap = HashMap<WorkflowVersionId, (WorkflowId, u64, WorkflowDefinition)>;
+
 #[derive(Default, Clone)]
 pub struct InMemoryStore {
-    definitions: Arc<RwLock<HashMap<WorkflowVersionId, (WorkflowId, u64, WorkflowDefinition)>>>,
+    definitions: Arc<RwLock<DefinitionsMap>>,
     executions: Arc<RwLock<HashMap<ExecutionId, (Execution, u64)>>>,
     queue: Arc<RwLock<VecDeque<QueuedTask>>>,
     workers: Arc<RwLock<HashMap<WorkerId, WorkerRegistration>>>,

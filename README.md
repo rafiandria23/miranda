@@ -1,5 +1,9 @@
 # Miranda
 
+[![CI](https://github.com/rafiandria23/miranda/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/rafiandria23/miranda/actions/workflows/ci.yml)
+[![Quality Gate Status](https://sonarcloud.io/api/project_badges/measure?project=rafiandria23_miranda&metric=alert_status&branch=main)](https://sonarcloud.io/summary/new_code?id=rafiandria23_miranda&branch=main)
+[![codecov](https://codecov.io/gh/rafiandria23/miranda/branch/main/graph/badge.svg)](https://codecov.io/gh/rafiandria23/miranda)
+
 A Rust-based durable workflow engine. Run task graphs locally with zero
 infrastructure, or scale out to a distributed fleet of workers coordinated by
 a real control plane, backed by Postgres, MySQL, or SQLite.

@@ -3,6 +3,9 @@ use std::{future::Future, pin::Pin, sync::Arc};
 
 use crate::error::StorageError;
 
+type LoadLatestFuture<'a> =
+    Pin<Box<dyn Future<Output = Result<Option<(u64, Vec<u8>)>, StorageError>> + Send + 'a>>;
+
 pub trait SnapshotStore: Send + Sync {
     fn save<'a>(
         &'a self,
@@ -17,10 +20,7 @@ pub trait SnapshotStore: Send + Sync {
         version: u64,
     ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, StorageError>> + Send + 'a>>;
 
-    fn load_latest<'a>(
-        &'a self,
-        execution_id: ExecutionId,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<(u64, Vec<u8>)>, StorageError>> + Send + 'a>>;
+    fn load_latest<'a>(&'a self, execution_id: ExecutionId) -> LoadLatestFuture<'a>;
 
     fn delete<'a>(
         &'a self,
@@ -46,11 +46,7 @@ impl SnapshotStore for Arc<dyn SnapshotStore + '_> {
         (**self).load(execution_id, version)
     }
 
-    fn load_latest<'a>(
-        &'a self,
-        execution_id: ExecutionId,
-    ) -> Pin<Box<dyn Future<Output = Result<Option<(u64, Vec<u8>)>, StorageError>> + Send + 'a>>
-    {
+    fn load_latest<'a>(&'a self, execution_id: ExecutionId) -> LoadLatestFuture<'a> {
         (**self).load_latest(execution_id)
     }
 

@@ -2,7 +2,10 @@ use miranda_core::{queue::QueuedTask, workflow::WorkflowDefinition};
 use miranda_storage::{task_queue_store::TaskQueueStore, workflow_store::WorkflowStore};
 use std::{future::Future, pin::Pin, sync::Arc};
 
-use crate::{error::ControlPlaneError, queue::TaskQueue};
+use crate::{
+    error::ControlPlaneError,
+    queue::{QueueItem, TaskQueue},
+};
 
 pub struct DurableTaskQueue<S> {
     store: Arc<S>,
@@ -33,17 +36,8 @@ where
 
     fn dequeue<'a>(
         &'a self,
-    ) -> Pin<
-        Box<
-            dyn Future<
-                    Output = Result<
-                        Option<(QueuedTask, Arc<WorkflowDefinition>)>,
-                        ControlPlaneError,
-                    >,
-                > + Send
-                + 'a,
-        >,
-    > {
+    ) -> Pin<Box<dyn Future<Output = Result<Option<QueueItem>, ControlPlaneError>> + Send + 'a>>
+    {
         Box::pin(async move {
             let Some(task) = self
                 .store

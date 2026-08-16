@@ -6,10 +6,12 @@ use tokio::sync::{RwLock, mpsc};
 
 use super::{super::control_plane_service::peers::PeerManager, service::proto::TaskNotification};
 
+type SharedPeerManager = Arc<RwLock<Option<Arc<PeerManager<Arc<dyn PeerStore>>>>>>;
+
 #[derive(Clone, Default)]
 pub struct GrpcTaskNotifier {
     subscribers: Arc<RwLock<HashMap<WorkerId, mpsc::Sender<TaskNotification>>>>,
-    peers: Arc<RwLock<Option<Arc<PeerManager<Arc<dyn PeerStore>>>>>>,
+    peers: SharedPeerManager,
 }
 
 impl GrpcTaskNotifier {

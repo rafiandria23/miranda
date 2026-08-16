@@ -99,24 +99,24 @@ mod tests {
 
     #[test]
     fn with_acquire_timeout_overrides_default() {
-        let config = MySqlConfig::new("mysql://localhost/db")
-            .with_acquire_timeout(Duration::from_secs(10));
+        let config =
+            MySqlConfig::new("mysql://localhost/db").with_acquire_timeout(Duration::from_secs(10));
 
         assert_eq!(config.acquire_timeout, Duration::from_secs(10));
     }
 
     #[test]
     fn with_idle_timeout_overrides_default() {
-        let config = MySqlConfig::new("mysql://localhost/db")
-            .with_idle_timeout(Duration::from_secs(120));
+        let config =
+            MySqlConfig::new("mysql://localhost/db").with_idle_timeout(Duration::from_secs(120));
 
         assert_eq!(config.idle_timeout, Duration::from_secs(120));
     }
 
     #[test]
     fn with_max_lifetime_overrides_default() {
-        let config = MySqlConfig::new("mysql://localhost/db")
-            .with_max_lifetime(Duration::from_secs(7200));
+        let config =
+            MySqlConfig::new("mysql://localhost/db").with_max_lifetime(Duration::from_secs(7200));
 
         assert_eq!(config.max_lifetime, Duration::from_secs(7200));
     }

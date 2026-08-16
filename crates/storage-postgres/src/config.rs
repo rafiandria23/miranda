@@ -100,16 +100,14 @@ mod tests {
 
     #[test]
     fn with_min_connections_overrides_default() {
-        let config =
-            PostgresConfig::new("postgres://localhost/db").with_min_connections(5);
+        let config = PostgresConfig::new("postgres://localhost/db").with_min_connections(5);
 
         assert_eq!(config.min_connections, 5);
     }
 
     #[test]
     fn with_max_connections_overrides_default() {
-        let config =
-            PostgresConfig::new("postgres://localhost/db").with_max_connections(50);
+        let config = PostgresConfig::new("postgres://localhost/db").with_max_connections(50);
 
         assert_eq!(config.max_connections, 50);
     }

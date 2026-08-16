@@ -61,7 +61,12 @@ mod tests {
     fn new_populates_all_fields() {
         let task_id = WorkflowTaskId::new();
         let worker_id = WorkerId::new();
-        let lease = TaskLease::new(task_id, worker_id, "token-abc".to_owned(), Duration::from_secs(30));
+        let lease = TaskLease::new(
+            task_id,
+            worker_id,
+            "token-abc".to_owned(),
+            Duration::from_secs(30),
+        );
 
         assert_eq!(lease.task_id, task_id);
         assert_eq!(lease.worker_id, worker_id);

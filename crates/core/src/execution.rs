@@ -74,17 +74,15 @@ impl Execution {
     }
 
     fn transition_to(&mut self, target: ExecutionStatus) -> Result<(), ExecutionError> {
-        let valid = match (self.status, target) {
-            (ExecutionStatus::Pending, ExecutionStatus::Running) => true,
-            (ExecutionStatus::Pending, ExecutionStatus::Cancelled) => true,
-
-            (ExecutionStatus::Running, ExecutionStatus::Completed) => true,
-            (ExecutionStatus::Running, ExecutionStatus::Failed) => true,
-            (ExecutionStatus::Running, ExecutionStatus::Cancelled) => true,
-            (ExecutionStatus::Running, ExecutionStatus::Terminated) => true,
-
-            _ => false,
-        };
+        let valid = matches!(
+            (self.status, target),
+            (ExecutionStatus::Pending, ExecutionStatus::Running)
+                | (ExecutionStatus::Pending, ExecutionStatus::Cancelled)
+                | (ExecutionStatus::Running, ExecutionStatus::Completed)
+                | (ExecutionStatus::Running, ExecutionStatus::Failed)
+                | (ExecutionStatus::Running, ExecutionStatus::Cancelled)
+                | (ExecutionStatus::Running, ExecutionStatus::Terminated)
+        );
 
         if !valid {
             return Err(ExecutionError::InvalidExecutionTransition {

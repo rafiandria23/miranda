@@ -88,10 +88,10 @@ async fn ensure_database_exists(config: &MySqlConfig) -> Result<(), sqlx::Error>
 }
 
 fn map_insert_error(err: sqlx::Error) -> StorageError {
-    if let sqlx::Error::Database(db_err) = &err {
-        if db_err.is_unique_violation() {
-            return StorageError::Conflict(db_err.to_string());
-        }
+    if let sqlx::Error::Database(db_err) = &err
+        && db_err.is_unique_violation()
+    {
+        return StorageError::Conflict(db_err.to_string());
     }
 
     StorageError::Backend(err.to_string())

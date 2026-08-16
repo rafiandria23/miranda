@@ -272,18 +272,13 @@ mod tests {
     fn parse_status_range_rejects_non_numeric_xx_prefix() {
         let result = parse_status_range("abcxx");
 
-        assert_eq!(
-            result.unwrap_err(),
-            "invalid status range shorthand: abcxx"
-        );
+        assert_eq!(result.unwrap_err(), "invalid status range shorthand: abcxx");
     }
 
     #[test]
     fn shell_task_config_deserializes_with_defaults() {
-        let config: TaskConfigSpec = serde_json::from_str(
-            r#"{"type": "shell", "command": "echo hi"}"#,
-        )
-        .unwrap();
+        let config: TaskConfigSpec =
+            serde_json::from_str(r#"{"type": "shell", "command": "echo hi"}"#).unwrap();
 
         match config {
             TaskConfigSpec::Shell {
@@ -297,7 +292,10 @@ mod tests {
                 assert!(env.is_empty());
                 assert!(cwd.is_none());
                 assert!(shell.is_none());
-                assert!(matches!(success_codes.as_slice(), [StatusMatcher::Exact(0)]));
+                assert!(matches!(
+                    success_codes.as_slice(),
+                    [StatusMatcher::Exact(0)]
+                ));
             }
             _ => panic!("expected Shell variant"),
         }

@@ -142,10 +142,7 @@ mod tests {
 
         let result = manager.validate("unknown-token", WorkerId::new()).await;
 
-        assert!(matches!(
-            result,
-            Err(ControlPlaneError::InvalidRequest(_))
-        ));
+        assert!(matches!(result, Err(ControlPlaneError::InvalidRequest(_))));
     }
 
     #[tokio::test]
@@ -165,10 +162,7 @@ mod tests {
 
         let result = manager.validate(&token, worker_id).await;
 
-        assert!(matches!(
-            result,
-            Err(ControlPlaneError::InvalidRequest(_))
-        ));
+        assert!(matches!(result, Err(ControlPlaneError::InvalidRequest(_))));
     }
 
     #[tokio::test]
@@ -187,10 +181,7 @@ mod tests {
 
         let result = manager.validate(&token, WorkerId::new()).await;
 
-        assert!(matches!(
-            result,
-            Err(ControlPlaneError::InvalidRequest(_))
-        ));
+        assert!(matches!(result, Err(ControlPlaneError::InvalidRequest(_))));
     }
 
     #[tokio::test]
@@ -212,10 +203,7 @@ mod tests {
 
         let result = manager.validate(&token, worker_id).await;
 
-        assert!(matches!(
-            result,
-            Err(ControlPlaneError::InvalidRequest(_))
-        ));
+        assert!(matches!(result, Err(ControlPlaneError::InvalidRequest(_))));
     }
 
     #[tokio::test]
