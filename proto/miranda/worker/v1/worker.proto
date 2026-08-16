@@ -46,9 +46,10 @@ message PollTaskResponse {
 }
 
 message TaskAssignment {
-  string lease_token = 1;
-  WorkflowTask task = 2;
-  optional uint64 timeout_ms = 3;
+  string execution_id = 1;
+  string lease_token = 2;
+  WorkflowTask task = 3;
+  optional uint64 timeout_ms = 4;
 }
 
 message WorkflowTask {

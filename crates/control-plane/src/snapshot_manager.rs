@@ -37,7 +37,7 @@ impl<S: SnapshotStore> SnapshotManager<S> {
         data: &[u8],
     ) -> Result<(), ControlPlaneError> {
         self.store
-            .save(execution_id, version, data)
+            .save_snapshot(execution_id, version, data)
             .await
             .map_err(ControlPlaneError::from)
     }
@@ -47,7 +47,7 @@ impl<S: SnapshotStore> SnapshotManager<S> {
         execution_id: ExecutionId,
     ) -> Result<Option<(u64, Vec<u8>)>, ControlPlaneError> {
         self.store
-            .load_latest(execution_id)
+            .load_latest_snapshot(execution_id)
             .await
             .map_err(ControlPlaneError::from)
     }

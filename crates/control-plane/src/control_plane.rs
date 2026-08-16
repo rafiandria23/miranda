@@ -280,6 +280,7 @@ where
             let timeout = definition.effective_timeout(&workflow_task);
 
             return Ok(Some(TaskAssignment {
+                execution_id: task.execution_id(),
                 lease_token,
                 task: workflow_task,
                 timeout,

@@ -1486,6 +1486,7 @@ name = "miranda-worker"
 version = "0.1.0"
 dependencies = [
  "miranda-core",
+ "miranda-storage",
  "reqwest",
  "serde",
  "serde_json",

@@ -29,4 +29,7 @@ pub struct Cli {
 
     #[arg(long, value_delimiter = ',')]
     pub capabilities: Vec<String>,
+
+    #[arg(long, default_value = "~/.miranda/artifacts")]
+    pub artifact_dir: String,
 }

@@ -331,7 +331,13 @@ async fn execute_and_report<C: ControlPlaneClient, E: TaskExecutor>(
 
     active_leases.write().await.insert(lease_token.clone(), ());
 
-    let result = executor.execute(&assignment.task, assignment.timeout).await;
+    let result = executor
+        .execute(
+            assignment.execution_id,
+            &assignment.task,
+            assignment.timeout,
+        )
+        .await;
 
     active_leases.write().await.remove(&lease_token);
 
@@ -349,7 +355,7 @@ async fn execute_and_report<C: ControlPlaneClient, E: TaskExecutor>(
 
 #[cfg(test)]
 mod tests {
-    use miranda_core::id::WorkflowTaskId;
+    use miranda_core::id::{ExecutionId, WorkflowTaskId};
     use std::{
         pin::Pin,
         sync::atomic::{AtomicU32, Ordering},
@@ -475,6 +481,7 @@ mod tests {
     impl TaskExecutor for CountingExecutor {
         async fn execute(
             &self,
+            _execution_id: ExecutionId,
             _task: &miranda_core::workflow::WorkflowTask,
             _timeout: Option<StdDuration>,
         ) -> Result<(), WorkerError> {
@@ -501,6 +508,7 @@ mod tests {
 
     fn test_assignment(lease_token: &str) -> TaskAssignment {
         TaskAssignment {
+            execution_id: ExecutionId::new(),
             lease_token: lease_token.to_owned(),
             task: miranda_core::workflow::WorkflowTask::new(
                 WorkflowTaskId::new(),

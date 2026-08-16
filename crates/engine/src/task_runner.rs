@@ -54,7 +54,10 @@ where
 
         let timeout = definition.effective_timeout(workflow_task);
 
-        Ok(self.executor.execute(workflow_task, timeout).await)
+        Ok(self
+            .executor
+            .execute(execution.id(), workflow_task, timeout)
+            .await)
     }
 }
 

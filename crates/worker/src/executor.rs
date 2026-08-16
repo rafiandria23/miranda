@@ -12,7 +12,7 @@ pub use noop::NoopExecutor;
 pub use shell::ShellExecutor;
 pub use wait::WaitExecutor;
 
-use miranda_core::workflow::WorkflowTask;
+use miranda_core::{id::ExecutionId, workflow::WorkflowTask};
 use std::{future::Future, time::Duration};
 
 use crate::WorkerError;
@@ -20,6 +20,7 @@ use crate::WorkerError;
 pub trait TaskExecutor: Send + Sync {
     fn execute(
         &self,
+        execution_id: ExecutionId,
         task: &WorkflowTask,
         timeout: Option<Duration>,
     ) -> impl Future<Output = Result<(), WorkerError>> + Send;

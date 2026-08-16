@@ -1,3 +1,4 @@
+pub mod artifact_store;
 pub mod error;
 pub mod filesystem;
 pub mod join_token_store;
@@ -10,6 +11,7 @@ pub mod snapshot_store;
 pub mod task_queue_store;
 pub mod workflow_store;
 
+pub use artifact_store::ArtifactStore;
 pub use error::StorageError;
 pub use filesystem::FilesystemStore;
 pub use join_token_store::JoinTokenStore;

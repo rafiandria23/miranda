@@ -1,4 +1,4 @@
-use miranda_core::{spec::dto::TaskConfigSpec, workflow::WorkflowTask};
+use miranda_core::{id::ExecutionId, spec::dto::TaskConfigSpec, workflow::WorkflowTask};
 use std::time::Duration;
 use time::OffsetDateTime;
 
@@ -9,6 +9,7 @@ pub struct WaitExecutor;
 impl TaskExecutor for WaitExecutor {
     async fn execute(
         &self,
+        _execution_id: ExecutionId,
         task: &WorkflowTask,
         _timeout: Option<Duration>,
     ) -> Result<(), WorkerError> {
@@ -85,7 +86,7 @@ mod tests {
             until: None,
         });
 
-        let result = WaitExecutor.execute(&task, None).await;
+        let result = WaitExecutor.execute(ExecutionId::new(), &task, None).await;
 
         assert!(result.is_ok());
     }
@@ -98,7 +99,7 @@ mod tests {
         });
 
         let start = Instant::now();
-        let result = WaitExecutor.execute(&task, None).await;
+        let result = WaitExecutor.execute(ExecutionId::new(), &task, None).await;
 
         assert!(result.is_ok());
         assert!(start.elapsed() >= Duration::from_secs(1));
@@ -117,7 +118,7 @@ mod tests {
         });
 
         let start = Instant::now();
-        let result = WaitExecutor.execute(&task, None).await;
+        let result = WaitExecutor.execute(ExecutionId::new(), &task, None).await;
 
         assert!(result.is_ok());
         assert!(start.elapsed() >= Duration::from_millis(50));
@@ -136,7 +137,7 @@ mod tests {
         });
 
         let start = Instant::now();
-        let result = WaitExecutor.execute(&task, None).await;
+        let result = WaitExecutor.execute(ExecutionId::new(), &task, None).await;
 
         assert!(result.is_ok());
         assert!(start.elapsed() < Duration::from_secs(1));
@@ -149,7 +150,7 @@ mod tests {
             until: Some("not-a-timestamp".to_owned()),
         });
 
-        let error = WaitExecutor.execute(&task, None).await.unwrap_err();
+        let error = WaitExecutor.execute(ExecutionId::new(), &task, None).await.unwrap_err();
 
         match error {
             WorkerError::ExecutionFailed { message } => {
@@ -166,7 +167,7 @@ mod tests {
             until: None,
         });
 
-        let error = WaitExecutor.execute(&task, None).await.unwrap_err();
+        let error = WaitExecutor.execute(ExecutionId::new(), &task, None).await.unwrap_err();
 
         match error {
             WorkerError::ExecutionFailed { message } => {
@@ -187,7 +188,7 @@ mod tests {
             ),
         });
 
-        let error = WaitExecutor.execute(&task, None).await.unwrap_err();
+        let error = WaitExecutor.execute(ExecutionId::new(), &task, None).await.unwrap_err();
 
         match error {
             WorkerError::ExecutionFailed { message } => {
@@ -205,9 +206,11 @@ mod tests {
             cwd: None,
             shell: None,
             success_codes: vec![],
+            outputs: Vec::new(),
+            inputs: Vec::new(),
         });
 
-        let error = WaitExecutor.execute(&task, None).await.unwrap_err();
+        let error = WaitExecutor.execute(ExecutionId::new(), &task, None).await.unwrap_err();
 
         assert_eq!(
             error,
@@ -223,7 +226,7 @@ mod tests {
             .unwrap()
             .with_config(json!({ "not": "a valid wait config" }));
 
-        let error = WaitExecutor.execute(&task, None).await.unwrap_err();
+        let error = WaitExecutor.execute(ExecutionId::new(), &task, None).await.unwrap_err();
 
         match error {
             WorkerError::ExecutionFailed { message } => {

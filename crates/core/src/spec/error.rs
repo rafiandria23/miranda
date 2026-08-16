@@ -10,6 +10,9 @@ pub enum SpecError {
     #[error("task '{0}' depends on unknown task '{1}'")]
     UnknownDependency(String, String),
 
+    #[error("task '{0}' references unknown artifact source task '{1}'")]
+    UnknownArtifactSource(String, String),
+
     #[error("failed to serialize task config: {0}")]
     ConfigSerialization(#[from] serde_json::Error),
 

@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 miranda-core = { path = "../core", features = ["spec"] }
+miranda-storage = { path = "../storage" }
 
 reqwest = { workspace = true }
 serde = { workspace = true }

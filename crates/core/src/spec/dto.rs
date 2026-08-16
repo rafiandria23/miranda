@@ -1,6 +1,12 @@
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use std::collections::{BTreeMap, HashMap};
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ArtifactInput {
+    pub from_task: String,
+    pub path: String,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct WorkflowSpec {
     pub name: String,
@@ -23,7 +29,7 @@ pub struct TaskSpec {
     pub depends_on: Vec<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "lowercase")]
 pub enum TaskConfigSpec {
     Shell {
@@ -40,6 +46,12 @@ pub enum TaskConfigSpec {
 
         #[serde(default = "default_shell_success_codes")]
         success_codes: Vec<StatusMatcher>,
+
+        #[serde(default)]
+        outputs: Vec<String>,
+
+        #[serde(default)]
+        inputs: Vec<ArtifactInput>,
     },
 
     Http {
@@ -81,7 +93,7 @@ fn default_http_success_codes() -> Vec<StatusMatcher> {
     vec![StatusMatcher::Range(200, 299)]
 }
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "UPPERCASE")]
 pub enum HttpMethod {
     Get,
@@ -287,6 +299,8 @@ mod tests {
                 cwd,
                 shell,
                 success_codes,
+                outputs,
+                inputs,
             } => {
                 assert_eq!(command, "echo hi");
                 assert!(env.is_empty());
@@ -296,6 +310,33 @@ mod tests {
                     success_codes.as_slice(),
                     [StatusMatcher::Exact(0)]
                 ));
+                assert!(outputs.is_empty());
+                assert!(inputs.is_empty());
+            }
+            _ => panic!("expected Shell variant"),
+        }
+    }
+
+    #[test]
+    fn shell_task_config_deserializes_outputs_and_inputs() {
+        let config: TaskConfigSpec = serde_json::from_str(
+            r#"{
+                "type": "shell",
+                "command": "echo hi",
+                "outputs": ["out.txt"],
+                "inputs": [{"from_task": "prev", "path": "in.txt"}]
+            }"#,
+        )
+        .unwrap();
+
+        match config {
+            TaskConfigSpec::Shell {
+                outputs, inputs, ..
+            } => {
+                assert_eq!(outputs, vec!["out.txt".to_string()]);
+                assert_eq!(inputs.len(), 1);
+                assert_eq!(inputs[0].from_task, "prev");
+                assert_eq!(inputs[0].path, "in.txt");
             }
             _ => panic!("expected Shell variant"),
         }

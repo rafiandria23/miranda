@@ -1,4 +1,7 @@
-use miranda_core::{id::WorkerId, workflow::WorkflowTask};
+use miranda_core::{
+    id::{ExecutionId, WorkerId},
+    workflow::WorkflowTask,
+};
 use miranda_worker::{ControlPlaneClient, WorkerError, assignment::TaskAssignment};
 use std::{collections::HashSet, pin::Pin, time::Duration};
 use tokio_stream::{Stream, StreamExt};
@@ -145,6 +148,17 @@ impl ControlPlaneClient for RemoteControlPlaneClient {
 }
 
 fn from_proto_assignment(assignment: ProtoTaskAssignment) -> Result<TaskAssignment, WorkerError> {
+    let execution_id: ExecutionId =
+        assignment
+            .execution_id
+            .parse()
+            .map_err(|_| WorkerError::ExecutionFailed {
+                message: format!(
+                    "invalid execution_id in response: {}",
+                    assignment.execution_id
+                ),
+            })?;
+
     let task_proto = assignment
         .task
         .ok_or_else(|| WorkerError::ExecutionFailed {
@@ -154,6 +168,7 @@ fn from_proto_assignment(assignment: ProtoTaskAssignment) -> Result<TaskAssignme
     let task = from_proto_task(task_proto)?;
 
     Ok(TaskAssignment {
+        execution_id,
         lease_token: assignment.lease_token,
         task,
         timeout: assignment.timeout_ms.map(Duration::from_millis),

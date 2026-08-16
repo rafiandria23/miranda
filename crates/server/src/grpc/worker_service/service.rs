@@ -118,6 +118,7 @@ where
             .map_err(to_status)?;
 
         let proto_assignment = assignment.map(|a| ProtoTaskAssignment {
+            execution_id: a.execution_id.to_string(),
             lease_token: a.lease_token,
             task: Some(to_proto_task(&a.task)),
             timeout_ms: a.timeout.map(|d| d.as_millis() as u64),

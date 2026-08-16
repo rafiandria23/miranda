@@ -10,6 +10,26 @@ use super::{
     error::SpecError,
 };
 
+fn resolve_config(
+    config: &TaskConfigSpec,
+    task_name: &str,
+    name_to_id: &HashMap<String, WorkflowTaskId>,
+) -> Result<TaskConfigSpec, SpecError> {
+    let mut config = config.clone();
+
+    if let TaskConfigSpec::Shell { inputs, .. } = &mut config {
+        for input in inputs.iter_mut() {
+            let resolved_id = name_to_id.get(&input.from_task).copied().ok_or_else(|| {
+                SpecError::UnknownArtifactSource(task_name.to_owned(), input.from_task.clone())
+            })?;
+
+            input.from_task = resolved_id.to_string();
+        }
+    }
+
+    Ok(config)
+}
+
 pub fn lower(spec: WorkflowSpec) -> Result<(Workflow, WorkflowDefinition), SpecError> {
     let name_to_id: HashMap<String, WorkflowTaskId> = spec
         .tasks
@@ -34,7 +54,9 @@ pub fn lower(spec: WorkflowSpec) -> Result<(Workflow, WorkflowDefinition), SpecE
             .collect::<Result<Vec<_>, _>>()?;
 
         let task_type = task_type_name(&task_spec.config);
-        let config = serde_json::to_value(&task_spec.config)?;
+
+        let resolved_config = resolve_config(&task_spec.config, name, &name_to_id)?;
+        let config = serde_json::to_value(&resolved_config)?;
 
         let mut task = WorkflowTask::new(id, task_type.to_owned(), dependencies)?;
         task = task.with_config(config);
@@ -227,6 +249,8 @@ mod tests {
                     cwd: None,
                     shell: None,
                     success_codes: vec![StatusMatcher::Exact(0)],
+                    outputs: Vec::new(),
+                    inputs: Vec::new(),
                 },
                 timeout: None,
                 depends_on: Vec::new(),
@@ -255,6 +279,8 @@ mod tests {
                 cwd: None,
                 shell: None,
                 success_codes: Vec::new(),
+                outputs: Vec::new(),
+                inputs: Vec::new(),
             }),
             "shell"
         );

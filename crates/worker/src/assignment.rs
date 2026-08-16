@@ -1,10 +1,14 @@
-use miranda_core::{id::WorkerId, workflow::WorkflowTask};
+use miranda_core::{
+    id::{ExecutionId, WorkerId},
+    workflow::WorkflowTask,
+};
 use std::{collections::HashSet, future::Future, pin::Pin, time::Duration};
 use tokio_stream::Stream;
 
 use crate::WorkerError;
 
 pub struct TaskAssignment {
+    pub execution_id: ExecutionId,
     pub lease_token: String,
     pub task: WorkflowTask,
     pub timeout: Option<Duration>,

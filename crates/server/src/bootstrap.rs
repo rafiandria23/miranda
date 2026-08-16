@@ -8,8 +8,9 @@ use miranda_control_plane::{
     router::{DurableRouter, Router},
 };
 use miranda_storage::{
-    join_token_store::JoinTokenStore, leadership_store::LeadershipStore, lease_store::LeaseStore,
-    peer_store::PeerStore, workflow_store::WorkflowStore,
+    artifact_store::ArtifactStore, filesystem::FilesystemStore, join_token_store::JoinTokenStore,
+    leadership_store::LeadershipStore, lease_store::LeaseStore, peer_store::PeerStore,
+    workflow_store::WorkflowStore,
 };
 use miranda_storage_mysql::{config::MySqlConfig, store::MySqlStore};
 use miranda_storage_postgres::{config::PostgresConfig, store::PostgresStore};
@@ -18,7 +19,7 @@ use miranda_worker::{
     executor::DispatchExecutor,
     worker::{Worker, WorkerConfig},
 };
-use std::{error::Error, net::SocketAddr, sync::Arc};
+use std::{error::Error, net::SocketAddr, path::PathBuf, sync::Arc};
 use time::Duration;
 use tokio::net::TcpListener;
 use uuid::Uuid;
@@ -56,6 +57,16 @@ fn resolve_advertise_address(
     }
 
     Ok(format!("http://{host}:{}", grpc_addr.port()))
+}
+
+fn resolve_home_relative(path: &str) -> PathBuf {
+    if let Some(rest) = path.strip_prefix("~/") {
+        if let Some(home) = dirs::home_dir() {
+            return home.join(rest);
+        }
+    }
+
+    return PathBuf::from(path);
 }
 
 pub type ServerControlPlane = ControlPlane<
@@ -270,7 +281,12 @@ async fn run_worker_only(args: Cli) -> Result<(), Box<dyn Error>> {
         crate::grpc::worker_service::client::RemoteControlPlaneClient::connect(control_plane_url)
             .await?,
     );
-    let executor = Arc::new(DispatchExecutor::new());
+
+    let artifact_dir = resolve_home_relative(&args.artifact_dir);
+    let artifact_store: Arc<dyn ArtifactStore> = Arc::new(FilesystemStore::new(artifact_dir));
+    let work_dir_root = resolve_home_relative("~/.miranda/work");
+
+    let executor = Arc::new(DispatchExecutor::new(artifact_store, work_dir_root));
 
     let worker = Worker::new(
         args.capabilities,
@@ -343,7 +359,12 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
     let client = Arc::new(crate::local_client::LocalControlPlaneClient::new(
         control_plane.clone(),
     ));
-    let executor = Arc::new(DispatchExecutor::new());
+
+    let artifact_dir = resolve_home_relative(&args.artifact_dir);
+    let artifact_store: Arc<dyn ArtifactStore> = Arc::new(FilesystemStore::new(artifact_dir));
+    let work_dir_root = resolve_home_relative("~/.miranda/work");
+
+    let executor = Arc::new(DispatchExecutor::new(artifact_store, work_dir_root));
 
     let worker = Worker::new(
         args.capabilities,

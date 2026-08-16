@@ -1,4 +1,4 @@
-use miranda_core::id::{ExecutionId, WorkflowId, WorkflowVersionId};
+use miranda_core::id::{ExecutionId, WorkflowId, WorkflowTaskId, WorkflowVersionId};
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -16,6 +16,22 @@ pub enum StorageError {
     SnapshotNotFound {
         execution_id: ExecutionId,
         version: u64,
+    },
+
+    #[error("artifact not found for execution {execution_id}, task {task_id}, path {path}")]
+    ArtifactNotFound {
+        execution_id: ExecutionId,
+        task_id: WorkflowTaskId,
+        path: String,
+    },
+
+    #[error(
+        "artifact at path {path} for execution {execution_id}, task {task_id} is a directory, not a single file"
+    )]
+    ArtifactIsDirectory {
+        execution_id: ExecutionId,
+        task_id: WorkflowTaskId,
+        path: String,
     },
 
     #[error("concurrency conflict for execution {id}: expected version {expected}, found {actual}")]
