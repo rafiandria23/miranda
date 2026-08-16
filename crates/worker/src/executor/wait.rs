@@ -150,7 +150,10 @@ mod tests {
             until: Some("not-a-timestamp".to_owned()),
         });
 
-        let error = WaitExecutor.execute(ExecutionId::new(), &task, None).await.unwrap_err();
+        let error = WaitExecutor
+            .execute(ExecutionId::new(), &task, None)
+            .await
+            .unwrap_err();
 
         match error {
             WorkerError::ExecutionFailed { message } => {
@@ -167,7 +170,10 @@ mod tests {
             until: None,
         });
 
-        let error = WaitExecutor.execute(ExecutionId::new(), &task, None).await.unwrap_err();
+        let error = WaitExecutor
+            .execute(ExecutionId::new(), &task, None)
+            .await
+            .unwrap_err();
 
         match error {
             WorkerError::ExecutionFailed { message } => {
@@ -188,7 +194,10 @@ mod tests {
             ),
         });
 
-        let error = WaitExecutor.execute(ExecutionId::new(), &task, None).await.unwrap_err();
+        let error = WaitExecutor
+            .execute(ExecutionId::new(), &task, None)
+            .await
+            .unwrap_err();
 
         match error {
             WorkerError::ExecutionFailed { message } => {
@@ -210,7 +219,10 @@ mod tests {
             inputs: Vec::new(),
         });
 
-        let error = WaitExecutor.execute(ExecutionId::new(), &task, None).await.unwrap_err();
+        let error = WaitExecutor
+            .execute(ExecutionId::new(), &task, None)
+            .await
+            .unwrap_err();
 
         assert_eq!(
             error,
@@ -226,7 +238,10 @@ mod tests {
             .unwrap()
             .with_config(json!({ "not": "a valid wait config" }));
 
-        let error = WaitExecutor.execute(ExecutionId::new(), &task, None).await.unwrap_err();
+        let error = WaitExecutor
+            .execute(ExecutionId::new(), &task, None)
+            .await
+            .unwrap_err();
 
         match error {
             WorkerError::ExecutionFailed { message } => {

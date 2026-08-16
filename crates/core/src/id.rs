@@ -122,3 +122,103 @@ define_id!(
     // Unique identifier for a worker process executing workflow tasks.
     WorkerId
 );
+
+// =========================================================================
+// Testing
+// =========================================================================
+
+#[cfg(test)]
+mod tests {
+    use std::str::FromStr;
+
+    use super::*;
+
+    #[test]
+    fn new_generates_unique_ids() {
+        let a = WorkflowId::new();
+        let b = WorkflowId::new();
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn default_generates_a_valid_id() {
+        let id = WorkflowId::default();
+        assert_eq!(id.as_uuid().get_version_num(), 7);
+    }
+
+    #[test]
+    fn from_uuid_and_as_uuid_round_trip() {
+        let uuid = Uuid::now_v7();
+        let id = WorkflowId::from_uuid(uuid);
+        assert_eq!(id.as_uuid(), &uuid);
+    }
+
+    #[test]
+    fn into_uuid_unwraps_inner_value() {
+        let uuid = Uuid::now_v7();
+        let id = WorkflowId::from_uuid(uuid);
+        assert_eq!(id.into_uuid(), uuid);
+    }
+
+    #[test]
+    fn display_formats_as_uuid_string() {
+        let uuid = Uuid::now_v7();
+        let id = WorkflowId::from_uuid(uuid);
+        assert_eq!(id.to_string(), uuid.to_string());
+    }
+
+    #[test]
+    fn from_str_parses_valid_uuid() {
+        let uuid = Uuid::now_v7();
+        let id = WorkflowId::from_str(&uuid.to_string()).unwrap();
+        assert_eq!(id.into_uuid(), uuid);
+    }
+
+    #[test]
+    fn from_str_rejects_invalid_uuid() {
+        assert!(WorkflowId::from_str("not-a-uuid").is_err());
+    }
+
+    #[test]
+    fn from_uuid_trait_conversion() {
+        let uuid = Uuid::now_v7();
+        let id: WorkflowId = uuid.into();
+        assert_eq!(id.into_uuid(), uuid);
+    }
+
+    #[test]
+    fn into_uuid_trait_conversion() {
+        let id = WorkflowId::new();
+        let uuid_from_id: Uuid = id.into();
+        assert_eq!(uuid_from_id, *id.as_uuid());
+    }
+
+    #[test]
+    fn ordering_matches_underlying_uuid_ordering() {
+        let a = Uuid::now_v7();
+        let b = Uuid::from_u128(a.as_u128() + 1);
+        let id_a = WorkflowId::from_uuid(a);
+        let id_b = WorkflowId::from_uuid(b);
+        assert!(id_a < id_b);
+    }
+
+    #[test]
+    fn serde_round_trip() {
+        let id = WorkflowId::new();
+        let json = serde_json::to_string(&id).unwrap();
+        let deserialized: WorkflowId = serde_json::from_str(&json).unwrap();
+        assert_eq!(id, deserialized);
+    }
+
+    #[test]
+    fn distinct_id_types_generate_correctly() {
+        assert_ne!(WorkflowVersionId::new(), WorkflowVersionId::new());
+        assert_ne!(WorkflowTaskId::new(), WorkflowTaskId::new());
+        assert_ne!(ExecutionId::new(), ExecutionId::new());
+        assert_ne!(TaskId::new(), TaskId::new());
+        assert_ne!(AttemptId::new(), AttemptId::new());
+        assert_ne!(EventId::new(), EventId::new());
+        assert_ne!(TaskQueueEntryId::new(), TaskQueueEntryId::new());
+        assert_ne!(WorkerId::new(), WorkerId::new());
+    }
+}

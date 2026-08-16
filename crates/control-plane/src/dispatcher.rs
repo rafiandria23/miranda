@@ -40,3 +40,41 @@ where
         self.queue.dequeue().await
     }
 }
+
+// =========================================================================
+// Testing
+// =========================================================================
+
+#[cfg(test)]
+mod tests {
+    use miranda_core::id::{ExecutionId, WorkflowTaskId};
+
+    use crate::queue::InMemoryTaskQueue;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn next_returns_none_when_queue_is_empty() {
+        let dispatcher = Dispatcher::new(InMemoryTaskQueue::new());
+
+        let result = dispatcher.next(WorkerId::new()).await.unwrap();
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn next_returns_the_dequeued_task() {
+        let queue = InMemoryTaskQueue::new();
+        let task = QueuedTask::new(ExecutionId::new(), WorkflowTaskId::new());
+        let task_id = task.id();
+        let definition = Arc::new(WorkflowDefinition::new(Vec::new()).unwrap());
+
+        queue.enqueue(task, definition).await.unwrap();
+
+        let dispatcher = Dispatcher::new(queue);
+
+        let (dequeued_task, _) = dispatcher.next(WorkerId::new()).await.unwrap().unwrap();
+
+        assert_eq!(dequeued_task.id(), task_id);
+    }
+}

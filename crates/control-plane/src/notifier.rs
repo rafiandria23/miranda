@@ -17,3 +17,23 @@ impl TaskNotifier for Arc<dyn TaskNotifier + '_> {
         (**self).notify_ready()
     }
 }
+
+// =========================================================================
+// Testing
+// =========================================================================
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn null_notifier_completes_without_error() {
+        NullTaskNotifier.notify_ready().await;
+    }
+
+    #[tokio::test]
+    async fn arc_dyn_notifier_delegates_to_the_inner_notifier() {
+        let notifier: Arc<dyn TaskNotifier> = Arc::new(NullTaskNotifier);
+        notifier.notify_ready().await;
+    }
+}

@@ -160,7 +160,9 @@ mod tests {
             .await;
 
         let task = task_with_config(http_config(format!("{}/ok", server.uri())));
-        let result = HttpExecutor::new().execute(ExecutionId::new(), &task, None).await;
+        let result = HttpExecutor::new()
+            .execute(ExecutionId::new(), &task, None)
+            .await;
 
         assert!(result.is_ok());
     }
@@ -176,7 +178,10 @@ mod tests {
             .await;
 
         let task = task_with_config(http_config(format!("{}/not-found", server.uri())));
-        let error = HttpExecutor::new().execute(ExecutionId::new(), &task, None).await.unwrap_err();
+        let error = HttpExecutor::new()
+            .execute(ExecutionId::new(), &task, None)
+            .await
+            .unwrap_err();
 
         match error {
             WorkerError::ExecutionFailed { message } => {
@@ -202,7 +207,9 @@ mod tests {
         }
 
         let task = task_with_config(config);
-        let result = HttpExecutor::new().execute(ExecutionId::new(), &task, None).await;
+        let result = HttpExecutor::new()
+            .execute(ExecutionId::new(), &task, None)
+            .await;
 
         assert!(result.is_ok());
     }
@@ -223,7 +230,9 @@ mod tests {
         }
 
         let task = task_with_config(config);
-        let result = HttpExecutor::new().execute(ExecutionId::new(), &task, None).await;
+        let result = HttpExecutor::new()
+            .execute(ExecutionId::new(), &task, None)
+            .await;
 
         assert!(result.is_ok());
     }
@@ -245,7 +254,9 @@ mod tests {
         }
 
         let task = task_with_config(config);
-        let result = HttpExecutor::new().execute(ExecutionId::new(), &task, None).await;
+        let result = HttpExecutor::new()
+            .execute(ExecutionId::new(), &task, None)
+            .await;
 
         assert!(result.is_ok());
     }
@@ -267,7 +278,9 @@ mod tests {
         }
 
         let task = task_with_config(config);
-        let result = HttpExecutor::new().execute(ExecutionId::new(), &task, None).await;
+        let result = HttpExecutor::new()
+            .execute(ExecutionId::new(), &task, None)
+            .await;
 
         assert!(result.is_ok());
     }
@@ -290,7 +303,9 @@ mod tests {
         }
 
         let task = task_with_config(config);
-        let result = HttpExecutor::new().execute(ExecutionId::new(), &task, None).await;
+        let result = HttpExecutor::new()
+            .execute(ExecutionId::new(), &task, None)
+            .await;
 
         assert!(result.is_ok());
     }
@@ -299,7 +314,10 @@ mod tests {
     async fn execute_returns_execution_failed_when_the_server_is_unreachable() {
         let task = task_with_config(http_config("http://127.0.0.1:0/unreachable".to_owned()));
 
-        let error = HttpExecutor::new().execute(ExecutionId::new(), &task, None).await.unwrap_err();
+        let error = HttpExecutor::new()
+            .execute(ExecutionId::new(), &task, None)
+            .await
+            .unwrap_err();
 
         match error {
             WorkerError::ExecutionFailed { message } => {
@@ -341,7 +359,10 @@ mod tests {
         };
         let task = task_with_config(config);
 
-        let error = HttpExecutor::new().execute(ExecutionId::new(), &task, None).await.unwrap_err();
+        let error = HttpExecutor::new()
+            .execute(ExecutionId::new(), &task, None)
+            .await
+            .unwrap_err();
 
         assert_eq!(
             error,
@@ -357,7 +378,10 @@ mod tests {
             .unwrap()
             .with_config(json!({ "not": "a valid http config" }));
 
-        let error = HttpExecutor::new().execute(ExecutionId::new(), &task, None).await.unwrap_err();
+        let error = HttpExecutor::new()
+            .execute(ExecutionId::new(), &task, None)
+            .await
+            .unwrap_err();
 
         match error {
             WorkerError::ExecutionFailed { message } => {
