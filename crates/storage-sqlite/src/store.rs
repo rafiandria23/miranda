@@ -1028,7 +1028,7 @@ impl PeerStore for SqliteStore {
 
 #[cfg(test)]
 mod tests {
-    use miranda_core::workflow::{WorkflowDefinition, WorkflowTask};
+    use miranda_core::{id::WorkflowTaskId, workflow::WorkflowTask};
 
     use super::*;
 
@@ -1045,11 +1045,163 @@ mod tests {
     }
 
     fn definition() -> WorkflowDefinition {
-        let task_id = miranda_core::id::WorkflowTaskId::new();
+        let task_id = WorkflowTaskId::new();
         let task = WorkflowTask::new(task_id, "send_email".to_owned(), vec![]).unwrap();
 
         WorkflowDefinition::new(vec![task]).unwrap()
     }
+
+    fn worker(capabilities: &[&str]) -> WorkerRegistration {
+        WorkerRegistration::new(
+            WorkerId::new(),
+            capabilities.iter().map(|c| c.to_string()).collect(),
+            OffsetDateTime::now_utc(),
+        )
+    }
+
+    // ---------------------------------------------------------------
+    // TaskQueueStore
+    // ---------------------------------------------------------------
+
+    #[tokio::test]
+    async fn dequeue_on_empty_queue_returns_none() {
+        let store = test_store().await;
+
+        assert!(store.dequeue().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn enqueue_then_dequeue_returns_fifo_order() {
+        let store = test_store().await;
+        let execution_id = ExecutionId::new();
+
+        let first = QueuedTask::new(execution_id, WorkflowTaskId::new());
+        let second = QueuedTask::new(execution_id, WorkflowTaskId::new());
+
+        store.enqueue(first).await.unwrap();
+        store.enqueue(second).await.unwrap();
+
+        assert_eq!(store.dequeue().await.unwrap().unwrap().id(), first.id());
+        assert_eq!(store.dequeue().await.unwrap().unwrap().id(), second.id());
+        assert!(store.dequeue().await.unwrap().is_none());
+    }
+
+    // ---------------------------------------------------------------
+    // RouterStore
+    // ---------------------------------------------------------------
+
+    #[tokio::test]
+    async fn register_then_select_worker_finds_matching_capability() {
+        let store = test_store().await;
+        let reg = worker(&["email"]);
+        let id = reg.id();
+
+        store.register_worker(reg).await.unwrap();
+
+        assert_eq!(store.select_worker("email").await.unwrap(), Some(id));
+        assert_eq!(store.select_worker("sms").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn register_worker_upserts_existing_id() {
+        let store = test_store().await;
+        let id = WorkerId::new();
+
+        let reg = WorkerRegistration::new(
+            id,
+            vec!["email".to_string()],
+            OffsetDateTime::now_utc(),
+        );
+        store.register_worker(reg).await.unwrap();
+
+        let updated = WorkerRegistration::new(
+            id,
+            vec!["sms".to_string()],
+            OffsetDateTime::now_utc(),
+        );
+        store.register_worker(updated).await.unwrap();
+
+        assert_eq!(store.select_worker("email").await.unwrap(), None);
+        assert_eq!(store.select_worker("sms").await.unwrap(), Some(id));
+    }
+
+    #[tokio::test]
+    async fn worker_has_capability_reflects_registration() {
+        let store = test_store().await;
+        let reg = worker(&["email"]);
+        let id = reg.id();
+
+        store.register_worker(reg).await.unwrap();
+
+        assert!(store.worker_has_capability(id, "email").await.unwrap());
+        assert!(!store.worker_has_capability(id, "sms").await.unwrap());
+        assert!(
+            !store
+                .worker_has_capability(WorkerId::new(), "email")
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn deregister_worker_removes_it() {
+        let store = test_store().await;
+        let reg = worker(&["email"]);
+        let id = reg.id();
+
+        store.register_worker(reg).await.unwrap();
+        store.deregister_worker(id).await.unwrap();
+
+        assert_eq!(store.select_worker("email").await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn touch_worker_updates_heartbeat() {
+        let store = test_store().await;
+        let old_heartbeat = OffsetDateTime::now_utc() - Duration::minutes(5);
+        let reg =
+            WorkerRegistration::new(WorkerId::new(), vec!["email".to_string()], old_heartbeat);
+        let id = reg.id();
+
+        store.register_worker(reg).await.unwrap();
+        store.touch_worker(id).await.unwrap();
+
+        assert!(
+            !store
+                .reap_stale_workers(Duration::minutes(1))
+                .await
+                .unwrap()
+                .contains(&id)
+        );
+    }
+
+    #[tokio::test]
+    async fn reap_stale_workers_removes_only_stale_entries() {
+        let store = test_store().await;
+        let stale = WorkerRegistration::new(
+            WorkerId::new(),
+            vec![],
+            OffsetDateTime::now_utc() - Duration::minutes(10),
+        );
+        let fresh = worker(&[]);
+        let stale_id = stale.id();
+        let fresh_id = fresh.id();
+
+        store.register_worker(stale).await.unwrap();
+        store.register_worker(fresh).await.unwrap();
+
+        let reaped = store
+            .reap_stale_workers(Duration::minutes(1))
+            .await
+            .unwrap();
+
+        assert_eq!(reaped, vec![stale_id]);
+        assert!(store.worker_has_capability(fresh_id, "").await.is_ok());
+    }
+
+    // ---------------------------------------------------------------
+    // WorkflowStore
+    // ---------------------------------------------------------------
 
     #[tokio::test]
     async fn save_definition_maps_duplicate_version_to_conflict() {
@@ -1115,5 +1267,530 @@ mod tests {
 
         let versions = store.get_versions(workflow_id).await.unwrap();
         assert_eq!(versions.len(), 2);
+    }
+
+    #[tokio::test]
+    async fn get_definition_missing_returns_not_found() {
+        let store = test_store().await;
+        let version_id = WorkflowVersionId::new();
+
+        let err = store.get_definition(version_id).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            StorageError::WorkflowVersionNotFound(id) if id == version_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn save_and_get_definition_roundtrips() {
+        let store = test_store().await;
+        let workflow_id = WorkflowId::new();
+        let version_id = WorkflowVersionId::new();
+        let definition = definition();
+
+        store
+            .save_definition(workflow_id, "wf", version_id, 1, &definition)
+            .await
+            .unwrap();
+
+        let loaded = store.get_definition(version_id).await.unwrap();
+
+        assert_eq!(loaded, definition);
+    }
+
+    #[tokio::test]
+    async fn save_and_get_execution_roundtrips_with_version_one() {
+        let store = test_store().await;
+        let workflow_id = WorkflowId::new();
+        let version_id = WorkflowVersionId::new();
+        let definition = definition();
+
+        store
+            .save_definition(workflow_id, "wf", version_id, 1, &definition)
+            .await
+            .unwrap();
+
+        let execution = Execution::from_definition(version_id, &definition).unwrap();
+        store.save_execution(&execution).await.unwrap();
+
+        let (loaded, version) = store.get_execution(execution.id()).await.unwrap();
+
+        assert_eq!(loaded.id(), execution.id());
+        assert_eq!(version, 1);
+    }
+
+    #[tokio::test]
+    async fn get_execution_missing_returns_not_found() {
+        let store = test_store().await;
+        let execution_id = ExecutionId::new();
+
+        let err = store.get_execution(execution_id).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            StorageError::ExecutionNotFound(id) if id == execution_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn update_execution_bumps_version_on_expected_match() {
+        let store = test_store().await;
+        let workflow_id = WorkflowId::new();
+        let version_id = WorkflowVersionId::new();
+        let definition = definition();
+
+        store
+            .save_definition(workflow_id, "wf", version_id, 1, &definition)
+            .await
+            .unwrap();
+
+        let execution = Execution::from_definition(version_id, &definition).unwrap();
+        store.save_execution(&execution).await.unwrap();
+        store.update_execution(&execution, 1).await.unwrap();
+
+        let (_, version) = store.get_execution(execution.id()).await.unwrap();
+
+        assert_eq!(version, 2);
+    }
+
+    #[tokio::test]
+    async fn update_execution_missing_returns_not_found() {
+        let store = test_store().await;
+        let workflow_id = WorkflowId::new();
+        let version_id = WorkflowVersionId::new();
+        let definition = definition();
+
+        store
+            .save_definition(workflow_id, "wf", version_id, 1, &definition)
+            .await
+            .unwrap();
+
+        let execution = Execution::from_definition(version_id, &definition).unwrap();
+
+        let err = store.update_execution(&execution, 1).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            StorageError::ExecutionNotFound(id) if id == execution.id()
+        ));
+    }
+
+    #[tokio::test]
+    async fn update_execution_with_stale_version_fails_optimistic_lock() {
+        let store = test_store().await;
+        let workflow_id = WorkflowId::new();
+        let version_id = WorkflowVersionId::new();
+        let definition = definition();
+
+        store
+            .save_definition(workflow_id, "wf", version_id, 1, &definition)
+            .await
+            .unwrap();
+
+        let execution = Execution::from_definition(version_id, &definition).unwrap();
+        store.save_execution(&execution).await.unwrap();
+
+        let err = store.update_execution(&execution, 99).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            StorageError::OptimisticLockFailed {
+                expected: 99,
+                actual: 1,
+                ..
+            }
+        ));
+    }
+
+    #[tokio::test]
+    async fn get_active_executions_excludes_finished() {
+        let store = test_store().await;
+        let workflow_id = WorkflowId::new();
+        let version_id = WorkflowVersionId::new();
+        let definition = definition();
+
+        store
+            .save_definition(workflow_id, "wf", version_id, 1, &definition)
+            .await
+            .unwrap();
+
+        let active = Execution::from_definition(version_id, &definition).unwrap();
+        store.save_execution(&active).await.unwrap();
+
+        let active_executions = store.get_active_executions().await.unwrap();
+
+        assert!(active_executions.iter().any(|e| e.id() == active.id()));
+    }
+
+    // ---------------------------------------------------------------
+    // LeaseStore
+    // ---------------------------------------------------------------
+
+    fn lease(token: &str, expires_in: Duration) -> Lease {
+        Lease {
+            worker_id: WorkerId::new(),
+            workflow_task_id: WorkflowTaskId::new(),
+            execution_id: ExecutionId::new(),
+            token: token.to_owned(),
+            expires_at: OffsetDateTime::now_utc() + expires_in,
+        }
+    }
+
+    #[tokio::test]
+    async fn create_then_get_lease_roundtrips() {
+        let store = test_store().await;
+        let l = lease("token-1", Duration::minutes(5));
+
+        store.create(l.clone()).await.unwrap();
+
+        let loaded = store.get("token-1").await.unwrap().unwrap();
+
+        assert_eq!(loaded.token, l.token);
+        assert_eq!(loaded.worker_id, l.worker_id);
+    }
+
+    #[tokio::test]
+    async fn get_missing_lease_returns_none() {
+        let store = test_store().await;
+
+        assert!(store.get("missing").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn renew_updates_expiry() {
+        let store = test_store().await;
+        let l = lease("token-1", Duration::minutes(5));
+
+        store.create(l).await.unwrap();
+
+        let new_expiry = OffsetDateTime::now_utc() + Duration::hours(1);
+        LeaseStore::renew(&store, "token-1", new_expiry)
+            .await
+            .unwrap();
+
+        let loaded = store.get("token-1").await.unwrap().unwrap();
+
+        assert!((loaded.expires_at - new_expiry).whole_seconds().abs() <= 1);
+    }
+
+    #[tokio::test]
+    async fn release_removes_lease() {
+        let store = test_store().await;
+        let l = lease("token-1", Duration::minutes(5));
+
+        store.create(l).await.unwrap();
+        LeaseStore::release(&store, "token-1").await.unwrap();
+
+        assert!(store.get("token-1").await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn active_for_worker_excludes_expired_and_other_workers() {
+        let store = test_store().await;
+        let worker_id = WorkerId::new();
+
+        let active = Lease {
+            worker_id,
+            workflow_task_id: WorkflowTaskId::new(),
+            execution_id: ExecutionId::new(),
+            token: "active".to_owned(),
+            expires_at: OffsetDateTime::now_utc() + Duration::minutes(5),
+        };
+        let expired = Lease {
+            worker_id,
+            workflow_task_id: WorkflowTaskId::new(),
+            execution_id: ExecutionId::new(),
+            token: "expired".to_owned(),
+            expires_at: OffsetDateTime::now_utc() - Duration::minutes(5),
+        };
+        let other_worker = lease("other", Duration::minutes(5));
+
+        store.create(active).await.unwrap();
+        store.create(expired).await.unwrap();
+        store.create(other_worker).await.unwrap();
+
+        let tokens = store.active_for_worker(worker_id).await.unwrap();
+
+        assert_eq!(tokens, vec!["active".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn reap_expired_removes_and_returns_expired_leases() {
+        let store = test_store().await;
+        let active = lease("active", Duration::minutes(5));
+        let expired = lease("expired", -Duration::minutes(5));
+
+        store.create(active).await.unwrap();
+        store.create(expired).await.unwrap();
+
+        let reaped = store.reap_expired().await.unwrap();
+
+        assert_eq!(reaped.len(), 1);
+        assert_eq!(reaped[0].token, "expired");
+        assert!(store.get("expired").await.unwrap().is_none());
+        assert!(store.get("active").await.unwrap().is_some());
+    }
+
+    // ---------------------------------------------------------------
+    // JoinTokenStore
+    // ---------------------------------------------------------------
+
+    #[tokio::test]
+    async fn get_token_with_none_set_returns_none() {
+        let store = test_store().await;
+
+        assert!(store.get_token().await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn set_then_get_token_roundtrips() {
+        let store = test_store().await;
+
+        store.set_token("secret").await.unwrap();
+
+        assert_eq!(store.get_token().await.unwrap(), Some("secret".to_string()));
+    }
+
+    #[tokio::test]
+    async fn set_token_overwrites_previous_value() {
+        let store = test_store().await;
+
+        store.set_token("first").await.unwrap();
+        store.set_token("second").await.unwrap();
+
+        assert_eq!(store.get_token().await.unwrap(), Some("second".to_string()));
+    }
+
+    // ---------------------------------------------------------------
+    // LeadershipStore
+    // ---------------------------------------------------------------
+
+    #[tokio::test]
+    async fn try_acquire_succeeds_when_unheld() {
+        let store = test_store().await;
+
+        assert!(
+            store
+                .try_acquire("node-1", Duration::minutes(1))
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            store.current_holder().await.unwrap(),
+            Some("node-1".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn try_acquire_fails_when_already_held_and_not_expired() {
+        let store = test_store().await;
+
+        store
+            .try_acquire("node-1", Duration::minutes(1))
+            .await
+            .unwrap();
+
+        assert!(
+            !store
+                .try_acquire("node-2", Duration::minutes(1))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn try_acquire_succeeds_after_expiry() {
+        let store = test_store().await;
+
+        store
+            .try_acquire("node-1", -Duration::seconds(1))
+            .await
+            .unwrap();
+
+        assert!(
+            store
+                .try_acquire("node-2", Duration::minutes(1))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn renew_extends_holder_lease() {
+        let store = test_store().await;
+
+        store
+            .try_acquire("node-1", Duration::minutes(1))
+            .await
+            .unwrap();
+
+        assert!(
+            LeadershipStore::renew(&store, "node-1", Duration::minutes(5))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn renew_fails_for_non_holder() {
+        let store = test_store().await;
+
+        store
+            .try_acquire("node-1", Duration::minutes(1))
+            .await
+            .unwrap();
+
+        assert!(
+            !LeadershipStore::renew(&store, "node-2", Duration::minutes(5))
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn release_clears_holder_when_current_holder() {
+        let store = test_store().await;
+
+        store
+            .try_acquire("node-1", Duration::minutes(1))
+            .await
+            .unwrap();
+        LeadershipStore::release(&store, "node-1").await.unwrap();
+
+        assert_eq!(store.current_holder().await.unwrap(), None);
+    }
+
+    #[tokio::test]
+    async fn release_is_noop_for_non_holder() {
+        let store = test_store().await;
+
+        store
+            .try_acquire("node-1", Duration::minutes(1))
+            .await
+            .unwrap();
+        LeadershipStore::release(&store, "node-2").await.unwrap();
+
+        assert_eq!(
+            store.current_holder().await.unwrap(),
+            Some("node-1".to_string())
+        );
+    }
+
+    #[tokio::test]
+    async fn current_holder_none_when_expired() {
+        let store = test_store().await;
+
+        store
+            .try_acquire("node-1", -Duration::seconds(1))
+            .await
+            .unwrap();
+
+        assert_eq!(store.current_holder().await.unwrap(), None);
+    }
+
+    // ---------------------------------------------------------------
+    // PeerStore
+    // ---------------------------------------------------------------
+
+    #[tokio::test]
+    async fn register_then_list_active_returns_peer() {
+        let store = test_store().await;
+
+        store.register("peer-1", "127.0.0.1:9000").await.unwrap();
+
+        let peers = store.list_active(Duration::minutes(1)).await.unwrap();
+
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].id, "peer-1");
+        assert_eq!(peers[0].grpc_address, "127.0.0.1:9000");
+    }
+
+    #[tokio::test]
+    async fn list_active_excludes_stale_peers() {
+        let store = test_store().await;
+
+        store.register("peer-1", "127.0.0.1:9000").await.unwrap();
+        store.register("peer-2", "127.0.0.1:9001").await.unwrap();
+
+        sqlx::query(
+            "UPDATE control_plane_instances SET last_heartbeat = datetime('now', '-10 minutes') WHERE id = 'peer-2'"
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        let peers = store.list_active(Duration::minutes(1)).await.unwrap();
+
+        assert_eq!(peers.len(), 1);
+        assert_eq!(peers[0].id, "peer-1");
+    }
+
+    #[tokio::test]
+    async fn touch_updates_last_heartbeat() {
+        let store = test_store().await;
+
+        store.register("peer-1", "127.0.0.1:9000").await.unwrap();
+        sqlx::query(
+            "UPDATE control_plane_instances SET last_heartbeat = datetime('now', '-10 minutes') WHERE id = 'peer-1'"
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        store.touch("peer-1").await.unwrap();
+
+        let peers = store.list_active(Duration::minutes(1)).await.unwrap();
+
+        assert_eq!(peers.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn touch_on_unknown_peer_is_ok() {
+        let store = test_store().await;
+
+        assert!(store.touch("missing").await.is_ok());
+    }
+
+    #[tokio::test]
+    async fn deregister_removes_peer() {
+        let store = test_store().await;
+
+        store.register("peer-1", "127.0.0.1:9000").await.unwrap();
+        store.deregister("peer-1").await.unwrap();
+
+        assert!(
+            store
+                .list_active(Duration::minutes(1))
+                .await
+                .unwrap()
+                .is_empty()
+        );
+    }
+
+    #[tokio::test]
+    async fn reap_stale_removes_and_returns_stale_peer_ids() {
+        let store = test_store().await;
+
+        store.register("peer-1", "127.0.0.1:9000").await.unwrap();
+        store.register("peer-2", "127.0.0.1:9001").await.unwrap();
+        sqlx::query(
+            "UPDATE control_plane_instances SET last_heartbeat = datetime('now', '-10 minutes') WHERE id = 'peer-2'"
+        )
+        .execute(&store.pool)
+        .await
+        .unwrap();
+
+        let reaped = store.reap_stale(Duration::minutes(1)).await.unwrap();
+
+        assert_eq!(reaped, vec!["peer-2".to_string()]);
+        assert!(
+            store
+                .list_active(Duration::minutes(1))
+                .await
+                .unwrap()
+                .iter()
+                .any(|p| p.id == "peer-1")
+        );
     }
 }
