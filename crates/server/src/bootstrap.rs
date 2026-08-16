@@ -60,13 +60,13 @@ fn resolve_advertise_address(
 }
 
 fn resolve_home_relative(path: &str) -> PathBuf {
-    if let Some(rest) = path.strip_prefix("~/") {
-        if let Some(home) = dirs::home_dir() {
-            return home.join(rest);
-        }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = dirs::home_dir()
+    {
+        return home.join(rest);
     }
 
-    return PathBuf::from(path);
+    PathBuf::from(path)
 }
 
 pub type ServerControlPlane = ControlPlane<

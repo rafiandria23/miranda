@@ -82,12 +82,11 @@ fn walk_dir<'a>(
 
             if file_type.is_dir() {
                 walk_dir(root, &path, paths).await?;
-            } else if path.extension().and_then(|e| e.to_str()) != Some("tmp") {
-                if let Ok(relative) = path.strip_prefix(root) {
-                    if let Some(s) = relative.to_str() {
-                        paths.push(s.to_owned());
-                    }
-                }
+            } else if path.extension().and_then(|e| e.to_str()) != Some("tmp")
+                && let Ok(relative) = path.strip_prefix(root)
+                && let Some(s) = relative.to_str()
+            {
+                paths.push(s.to_owned());
             }
         }
 
