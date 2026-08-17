@@ -35,3 +35,11 @@ url = { version = "2.5.8" }
 uuid = { version = "1.24.0", features = ["serde", "v4", "v7"] }
 wiremock = { version = "0.6" }
 yaml_serde = { version = "0.10.4" }
+
+[profile.release]
+opt-level = 3
+lto = "fat"
+codegen-units = 1
+panic = "abort"
+strip = true
+overflow-checks = false

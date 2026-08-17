@@ -46,7 +46,7 @@ fn resolve_advertise_address(
         None => grpc_addr.ip().to_string(),
     };
 
-    if grpc_addr.ip().is_unspecified() || is_unspecified_host(&host) {
+    if is_unspecified_host(&host) {
         return Err(format!(
             "cannot advertise an unspecified address ({host}) to peers — pass \
             --advertise-address with a real, dialable host (e.g. 127.0.0.1 for \
