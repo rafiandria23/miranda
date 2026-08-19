@@ -3,7 +3,9 @@ use miranda_control_plane::{
     queue::TaskQueue, router::Router,
 };
 use miranda_core::{id::WorkerId, workflow::WorkflowTask};
-use miranda_storage::{lease_store::LeaseStore, workflow_store::WorkflowStore};
+use miranda_storage::{
+    artifact_store::ArtifactStore, lease_store::LeaseStore, workflow_store::WorkflowStore,
+};
 use miranda_worker::error::WorkerError;
 use std::{pin::Pin, sync::Arc};
 use tokio_stream::{Stream, StreamExt, wrappers::ReceiverStream};
@@ -25,14 +27,14 @@ use proto::{
 
 use super::super::error::to_status;
 
-pub struct WorkerServiceImpl<Q, R, S, D, N, L> {
-    control_plane: Arc<ControlPlane<Q, R, S, D, N, L>>,
+pub struct WorkerServiceImpl<Q, R, S, D, N, L, A> {
+    control_plane: Arc<ControlPlane<Q, R, S, D, N, L, A>>,
     notifier: GrpcTaskNotifier,
 }
 
-impl<Q, R, S, D, N, L> WorkerServiceImpl<Q, R, S, D, N, L> {
+impl<Q, R, S, D, N, L, A> WorkerServiceImpl<Q, R, S, D, N, L, A> {
     pub fn new(
-        control_plane: Arc<ControlPlane<Q, R, S, D, N, L>>,
+        control_plane: Arc<ControlPlane<Q, R, S, D, N, L, A>>,
         notifier: GrpcTaskNotifier,
     ) -> Self {
         Self {
@@ -43,7 +45,7 @@ impl<Q, R, S, D, N, L> WorkerServiceImpl<Q, R, S, D, N, L> {
 }
 
 #[tonic::async_trait]
-impl<Q, R, S, D, N, L> WorkerService for WorkerServiceImpl<Q, R, S, D, N, L>
+impl<Q, R, S, D, N, L, A> WorkerService for WorkerServiceImpl<Q, R, S, D, N, L, A>
 where
     Q: TaskQueue + 'static,
     R: Router + 'static,
@@ -51,6 +53,7 @@ where
     D: DispatchStrategy + 'static,
     N: TaskNotifier + 'static,
     L: LeaseStore + 'static,
+    A: ArtifactStore + 'static,
 {
     async fn register(
         &self,

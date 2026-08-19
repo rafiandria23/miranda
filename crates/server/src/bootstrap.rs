@@ -8,7 +8,7 @@ use miranda_control_plane::{
     router::{DurableRouter, Router},
 };
 use miranda_storage::{
-    filesystem::build_artifact_store, join_token_store::JoinTokenStore,
+    artifact_store::ArtifactStore, join_token_store::JoinTokenStore,
     leadership_store::LeadershipStore, lease_store::LeaseStore, peer_store::PeerStore,
     workflow_store::WorkflowStore,
 };
@@ -76,10 +76,12 @@ pub type ServerControlPlane = ControlPlane<
     Dispatcher<Arc<dyn TaskQueue>>,
     Arc<dyn TaskNotifier>,
     Arc<dyn LeaseStore>,
+    Arc<dyn ArtifactStore>,
 >;
 
 async fn build_control_plane(
     database_url: &str,
+    artifact_dir: &str,
 ) -> Result<
     (
         ServerControlPlane,
@@ -135,7 +137,18 @@ async fn build_control_plane(
     let dispatch = Dispatcher::new(queue.clone());
     let leases = LeaseManager::new(lease_store);
 
-    let control_plane = ControlPlane::new(queue, router, store, dispatch, notifier, leases);
+    let artifact_store =
+        miranda_storage::filesystem::build_artifact_store(resolve_home_relative(artifact_dir));
+
+    let control_plane = ControlPlane::new(
+        queue,
+        router,
+        store,
+        dispatch,
+        notifier,
+        leases,
+        artifact_store,
+    );
 
     Ok((
         control_plane,
@@ -146,8 +159,8 @@ async fn build_control_plane(
     ))
 }
 
-async fn run_reaper<Q, R, S, D, N, L, P>(
-    control_plane: Arc<ControlPlane<Q, R, S, D, N, L>>,
+async fn run_reaper<Q, R, S, D, N, L, P, A>(
+    control_plane: Arc<ControlPlane<Q, R, S, D, N, L, A>>,
     leadership: Arc<LeadershipRunner<Arc<dyn LeadershipStore>>>,
     peer_store: P,
     period: Duration,
@@ -159,6 +172,7 @@ async fn run_reaper<Q, R, S, D, N, L, P>(
     N: TaskNotifier,
     L: LeaseStore,
     P: PeerStore,
+    A: ArtifactStore,
 {
     let std_period: std::time::Duration = period
         .try_into()
@@ -198,7 +212,7 @@ async fn run_control_plane_only(args: Cli) -> Result<(), Box<dyn Error>> {
         .database_url
         .ok_or("--database-url is required when using --control-plane")?;
     let (control_plane, grpc_notifier, join_token_store, leadership_store, peer_store) =
-        build_control_plane(&database_url).await?;
+        build_control_plane(&database_url, &args.artifact_dir).await?;
 
     let token = match args.join_token {
         Some(token) => {
@@ -283,7 +297,7 @@ async fn run_worker_only(args: Cli) -> Result<(), Box<dyn Error>> {
     );
 
     let artifact_dir = resolve_home_relative(&args.artifact_dir);
-    let artifact_store = build_artifact_store(artifact_dir);
+    let artifact_store = miranda_storage::filesystem::build_artifact_store(artifact_dir);
     let work_dir_root = resolve_home_relative("~/.miranda/work");
 
     let executor = Arc::new(DispatchExecutor::new(artifact_store, work_dir_root));
@@ -329,7 +343,7 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
         .ok_or("--database-url is required when using --control-plane and --worker together")?;
 
     let (control_plane, grpc_notifier, join_token_store, leadership_store, peer_store) =
-        build_control_plane(&database_url).await?;
+        build_control_plane(&database_url, &args.artifact_dir).await?;
 
     let token = match args.join_token {
         Some(token) => {
@@ -361,7 +375,7 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
     ));
 
     let artifact_dir = resolve_home_relative(&args.artifact_dir);
-    let artifact_store = build_artifact_store(artifact_dir);
+    let artifact_store = miranda_storage::filesystem::build_artifact_store(artifact_dir);
     let work_dir_root = resolve_home_relative("~/.miranda/work");
 
     let executor = Arc::new(DispatchExecutor::new(artifact_store, work_dir_root));

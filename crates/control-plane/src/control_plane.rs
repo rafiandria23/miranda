@@ -12,8 +12,8 @@ use miranda_engine::{
     task_runner::{TaskOutcome, TaskOutcomeResult},
 };
 use miranda_storage::{
-    error::StorageError, join_token_store::JoinTokenStore, lease_store::LeaseStore,
-    workflow_store::WorkflowStore,
+    artifact_store::ArtifactStore, error::StorageError, join_token_store::JoinTokenStore,
+    lease_store::LeaseStore, workflow_store::WorkflowStore,
 };
 use miranda_worker::{assignment::TaskAssignment, error::WorkerError};
 use std::{collections::HashMap, sync::Arc};
@@ -28,20 +28,21 @@ use crate::{
     router::{DEFAULT_WORKER_STALENESS_THRESHOLD, Router},
 };
 
-pub struct ControlPlane<Q, R, S, D, N, L> {
+pub struct ControlPlane<Q, R, S, D, N, L, A> {
     queue: Q,
     router: R,
     store: S,
     dispatch: D,
     notifier: N,
     leases: LeaseManager<L>,
+    artifacts: A,
     join_tokens: Option<Arc<dyn JoinTokenStore>>,
     retry_policy: RetryPolicy,
     lease_ttl: Duration,
     worker_staleness_threshold: Duration,
 }
 
-impl<Q, R, S, D, N, L> ControlPlane<Q, R, S, D, N, L>
+impl<Q, R, S, D, N, L, A> ControlPlane<Q, R, S, D, N, L, A>
 where
     Q: TaskQueue,
     R: Router,
@@ -49,6 +50,7 @@ where
     D: DispatchStrategy,
     N: TaskNotifier,
     L: LeaseStore,
+    A: ArtifactStore,
 {
     pub fn new(
         queue: Q,
@@ -57,6 +59,7 @@ where
         dispatch: D,
         notifier: N,
         leases: LeaseManager<L>,
+        artifacts: A,
     ) -> Self {
         Self {
             queue,
@@ -65,6 +68,7 @@ where
             dispatch,
             notifier,
             leases,
+            artifacts,
             join_tokens: None,
             retry_policy: RetryPolicy::default(),
             lease_ttl: DEFAULT_LEASE_TTL,
@@ -470,6 +474,29 @@ where
             .await
             .map_err(ControlPlaneError::from)
     }
+
+    pub async fn get_artifact(
+        &self,
+        execution_id: ExecutionId,
+        task_id: WorkflowTaskId,
+        path: &str,
+    ) -> Result<Vec<u8>, ControlPlaneError> {
+        self.artifacts
+            .load_artifact(execution_id, task_id, path)
+            .await
+            .map_err(ControlPlaneError::from)
+    }
+
+    pub async fn list_artifacts(
+        &self,
+        execution_id: ExecutionId,
+        task_id: WorkflowTaskId,
+    ) -> Result<Vec<String>, ControlPlaneError> {
+        self.artifacts
+            .list_artifacts(execution_id, task_id)
+            .await
+            .map_err(ControlPlaneError::from)
+    }
 }
 
 // =========================================================================
@@ -495,6 +522,7 @@ mod tests {
         RoutedDispatcher<InMemoryTaskQueue, InMemoryRouter>,
         NullTaskNotifier,
         InMemoryStore,
+        InMemoryStore,
     >;
 
     fn control_plane() -> TestControlPlane {
@@ -503,8 +531,17 @@ mod tests {
         let store = InMemoryStore::new();
         let dispatch = RoutedDispatcher::new(queue.clone(), router.clone());
         let leases = LeaseManager::new(InMemoryStore::new());
+        let artifacts = InMemoryStore::new();
 
-        ControlPlane::new(queue, router, store, dispatch, NullTaskNotifier, leases)
+        ControlPlane::new(
+            queue,
+            router,
+            store,
+            dispatch,
+            NullTaskNotifier,
+            leases,
+            artifacts,
+        )
     }
 
     fn definition_with_task(task_type: &str) -> (WorkflowDefinition, WorkflowTaskId) {
@@ -721,5 +758,82 @@ mod tests {
             .expect("reap succeeds");
 
         assert_eq!(recovered, 0);
+    }
+
+    #[tokio::test]
+    async fn get_artifact_returns_previously_saved_data() {
+        let control_plane = control_plane();
+        let execution_id = ExecutionId::new();
+        let task_id = WorkflowTaskId::new();
+
+        control_plane
+            .artifacts
+            .save_artifact(execution_id, task_id, "out.txt", b"hello")
+            .await
+            .expect("save succeeds");
+
+        let data = control_plane
+            .get_artifact(execution_id, task_id, "out.txt")
+            .await
+            .expect("get_artifact succeeds");
+
+        assert_eq!(data, b"hello");
+    }
+
+    #[tokio::test]
+    async fn get_artifact_returns_not_found_error_for_missing_path() {
+        let control_plane = control_plane();
+        let execution_id = ExecutionId::new();
+        let task_id = WorkflowTaskId::new();
+
+        let result = control_plane
+            .get_artifact(execution_id, task_id, "missing.txt")
+            .await;
+
+        assert!(matches!(
+            result,
+            Err(ControlPlaneError::Storage(
+                StorageError::ArtifactNotFound { .. }
+            ))
+        ));
+    }
+
+    #[tokio::test]
+    async fn list_artifacts_returns_all_saved_paths_for_the_task() {
+        let control_plane = control_plane();
+        let execution_id = ExecutionId::new();
+        let task_id = WorkflowTaskId::new();
+
+        control_plane
+            .artifacts
+            .save_artifact(execution_id, task_id, "a.txt", b"a")
+            .await
+            .expect("save succeeds");
+        control_plane
+            .artifacts
+            .save_artifact(execution_id, task_id, "b.txt", b"b")
+            .await
+            .expect("save succeeds");
+
+        let paths = control_plane
+            .list_artifacts(execution_id, task_id)
+            .await
+            .expect("list_artifacts succeeds");
+
+        assert_eq!(paths, vec!["a.txt".to_string(), "b.txt".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn list_artifacts_returns_empty_when_none_saved() {
+        let control_plane = control_plane();
+        let execution_id = ExecutionId::new();
+        let task_id = WorkflowTaskId::new();
+
+        let paths = control_plane
+            .list_artifacts(execution_id, task_id)
+            .await
+            .expect("list_artifacts succeeds");
+
+        assert!(paths.is_empty());
     }
 }

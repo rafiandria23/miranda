@@ -6,7 +6,9 @@ use miranda_control_plane::{
     control_plane::ControlPlane, dispatcher::DispatchStrategy, notifier::TaskNotifier,
     queue::TaskQueue, router::Router,
 };
-use miranda_storage::{lease_store::LeaseStore, workflow_store::WorkflowStore};
+use miranda_storage::{
+    artifact_store::ArtifactStore, lease_store::LeaseStore, workflow_store::WorkflowStore,
+};
 use std::{net::SocketAddr, sync::Arc};
 use tonic::transport::Server;
 
@@ -18,8 +20,8 @@ use worker_service::{
     service::{WorkerServiceImpl, proto::worker_service_server::WorkerServiceServer},
 };
 
-pub async fn serve_all<Q, R, S, D, N, L>(
-    control_plane: Arc<ControlPlane<Q, R, S, D, N, L>>,
+pub async fn serve_all<Q, R, S, D, N, L, A>(
+    control_plane: Arc<ControlPlane<Q, R, S, D, N, L, A>>,
     notifier: GrpcTaskNotifier,
     addr: SocketAddr,
 ) -> Result<(), tonic::transport::Error>
@@ -30,6 +32,7 @@ where
     D: DispatchStrategy + 'static,
     N: TaskNotifier + 'static,
     L: LeaseStore + 'static,
+    A: ArtifactStore + 'static,
 {
     let worker_service = WorkerServiceImpl::new(control_plane, notifier.clone());
     let control_plane_service = ControlPlaneServiceImpl::new(notifier);

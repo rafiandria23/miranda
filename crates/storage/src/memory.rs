@@ -1,6 +1,6 @@
 use miranda_core::{
     execution::Execution,
-    id::{ExecutionId, WorkerId, WorkflowId, WorkflowVersionId},
+    id::{ExecutionId, WorkerId, WorkflowId, WorkflowTaskId, WorkflowVersionId},
     lease::Lease,
     queue::QueuedTask,
     router::WorkerRegistration,
@@ -16,6 +16,7 @@ use time::{Duration, OffsetDateTime};
 use tokio::sync::RwLock;
 
 use crate::{
+    artifact_store::ArtifactStore,
     error::StorageError,
     join_token_store::JoinTokenStore,
     leadership_store::LeadershipStore,
@@ -27,6 +28,7 @@ use crate::{
 };
 
 type DefinitionsMap = HashMap<WorkflowVersionId, (WorkflowId, u64, WorkflowDefinition)>;
+type ArtifactsMap = HashMap<(ExecutionId, WorkflowTaskId, String), Vec<u8>>;
 
 #[derive(Default, Clone)]
 pub struct InMemoryStore {
@@ -38,6 +40,7 @@ pub struct InMemoryStore {
     join_token: Arc<RwLock<Option<String>>>,
     leadership: Arc<RwLock<Option<(String, OffsetDateTime)>>>,
     peers: Arc<RwLock<HashMap<String, (String, OffsetDateTime)>>>,
+    artifacts: Arc<RwLock<ArtifactsMap>>,
 }
 
 impl InMemoryStore {
@@ -570,6 +573,85 @@ impl PeerStore for InMemoryStore {
             }
 
             Ok(stale_ids)
+        })
+    }
+}
+
+// =========================================================================
+// Artifact Store Implementation
+// =========================================================================
+
+impl ArtifactStore for InMemoryStore {
+    fn save_artifact<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+        task_id: WorkflowTaskId,
+        path: &'a str,
+        data: &'a [u8],
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.artifacts
+                .write()
+                .await
+                .insert((execution_id, task_id, path.to_owned()), data.to_vec());
+
+            Ok(())
+        })
+    }
+
+    fn load_artifact<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+        task_id: WorkflowTaskId,
+        path: &'a str,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.artifacts
+                .read()
+                .await
+                .get(&(execution_id, task_id, path.to_owned()))
+                .cloned()
+                .ok_or(StorageError::ArtifactNotFound {
+                    execution_id,
+                    task_id,
+                    path: path.to_owned(),
+                })
+        })
+    }
+
+    fn list_artifacts<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+        task_id: WorkflowTaskId,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<String>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            let mut paths: Vec<String> = self
+                .artifacts
+                .read()
+                .await
+                .keys()
+                .filter(|(eid, tid, _)| *eid == execution_id && *tid == task_id)
+                .map(|(_, _, path)| path.clone())
+                .collect();
+
+            paths.sort();
+
+            Ok(paths)
+        })
+    }
+
+    fn delete_artifacts<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+        task_id: WorkflowTaskId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.artifacts
+                .write()
+                .await
+                .retain(|(eid, tid, _), _| *eid != execution_id || *tid != task_id);
+
+            Ok(())
         })
     }
 }
@@ -1237,6 +1319,102 @@ mod tests {
                 .unwrap()
                 .iter()
                 .any(|p| p.id == "peer-1")
+        );
+    }
+
+    // ---------------------------------------------------------------
+    // ArtifactStore
+    // ---------------------------------------------------------------
+
+    #[tokio::test]
+    async fn save_then_load_artifact_roundtrips_the_data() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+        let task_id = WorkflowTaskId::new();
+
+        store
+            .save_artifact(execution_id, task_id, "out.txt", b"hello")
+            .await
+            .unwrap();
+
+        let data = store
+            .load_artifact(execution_id, task_id, "out.txt")
+            .await
+            .unwrap();
+
+        assert_eq!(data, b"hello");
+    }
+
+    #[tokio::test]
+    async fn load_artifact_returns_not_found_for_missing_path() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+        let task_id = WorkflowTaskId::new();
+
+        let err = store
+            .load_artifact(execution_id, task_id, "missing.txt")
+            .await
+            .unwrap_err();
+
+        assert!(matches!(err, StorageError::ArtifactNotFound { .. }));
+    }
+
+    #[tokio::test]
+    async fn list_artifacts_returns_sorted_paths_scoped_to_execution_and_task() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+        let task_id = WorkflowTaskId::new();
+        let other_task_id = WorkflowTaskId::new();
+
+        store
+            .save_artifact(execution_id, task_id, "b.txt", b"b")
+            .await
+            .unwrap();
+        store
+            .save_artifact(execution_id, task_id, "a.txt", b"a")
+            .await
+            .unwrap();
+        store
+            .save_artifact(execution_id, other_task_id, "c.txt", b"c")
+            .await
+            .unwrap();
+
+        let paths = store.list_artifacts(execution_id, task_id).await.unwrap();
+
+        assert_eq!(paths, vec!["a.txt".to_string(), "b.txt".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn delete_artifacts_removes_only_the_matching_task() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+        let task_id = WorkflowTaskId::new();
+        let other_task_id = WorkflowTaskId::new();
+
+        store
+            .save_artifact(execution_id, task_id, "a.txt", b"a")
+            .await
+            .unwrap();
+        store
+            .save_artifact(execution_id, other_task_id, "c.txt", b"c")
+            .await
+            .unwrap();
+
+        store.delete_artifacts(execution_id, task_id).await.unwrap();
+
+        assert!(
+            store
+                .list_artifacts(execution_id, task_id)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            store
+                .list_artifacts(execution_id, other_task_id)
+                .await
+                .unwrap(),
+            vec!["c.txt".to_string()]
         );
     }
 }

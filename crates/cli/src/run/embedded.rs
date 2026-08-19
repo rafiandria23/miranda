@@ -3,7 +3,7 @@ use miranda_engine::EmbeddedEngine;
 // use miranda_storage::InMemoryStore;
 // use miranda_storage_mysql::{MySqlConfig, MySqlStore};
 // use miranda_storage_postgres::{PostgresConfig, PostgresStore};
-use miranda_storage::{WorkflowStore, filesystem::build_artifact_store};
+use miranda_storage::WorkflowStore;
 use miranda_storage_sqlite::{SqliteConfig, SqliteStore};
 use miranda_worker::DispatchExecutor;
 use std::{error::Error, path::Path};
@@ -42,7 +42,7 @@ async fn run_from_yaml_with_db_path(
         .save_definition(workflow.id(), workflow.name(), version_id, 1, &definition)
         .await?;
 
-    let artifact_store = build_artifact_store(artifact_dir);
+    let artifact_store = miranda_storage::filesystem::build_artifact_store(artifact_dir);
 
     let engine = EmbeddedEngine::new(
         DispatchExecutor::new(artifact_store, work_dir_root.to_path_buf()),
