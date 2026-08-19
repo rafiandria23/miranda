@@ -57,6 +57,12 @@ Built-in executors (`ShellExecutor`, `HttpExecutor`, `WaitExecutor`,
 adjacent `executor/` folder for the current shape. New built-in task types
 land in this crate.
 
+`ShellExecutor` (`executor/shell.rs`) also handles artifact transfer around
+the command it runs: declared `inputs` are downloaded from the
+`ArtifactStore` into the task's working directory before the command
+starts, and declared `outputs` are uploaded from that directory back to the
+`ArtifactStore` after a successful run — not just plain command execution.
+
 ## `storage`
 
 ```
@@ -70,13 +76,25 @@ storage/src/
 ├── join_token_store.rs                           # JoinTokenStore trait
 ├── leadership_store.rs                              # LeadershipStore trait
 ├── peer_store.rs                                       # PeerStore trait
-└── memory.rs                                              # InMemoryStore — implements every trait above
+├── snapshot_store.rs                                      # SnapshotStore trait
+├── artifact_store.rs                                         # ArtifactStore trait
+├── memory.rs                                                    # InMemoryStore — implements every trait above
+└── filesystem.rs                                                   # FilesystemStore — implements SnapshotStore + ArtifactStore
 ```
 
 Every trait here is deliberately storage-shaped and backend-agnostic — no
 knowledge of `control-plane`'s vocabulary, no assumption about which SQL
 engine (if any) implements it. `InMemoryStore` is the one shared
 implementation used by embedded mode and by tests.
+
+`SnapshotStore` and `ArtifactStore` are deliberately separate traits, not
+one merged concept: `SnapshotStore` is internal execution-state
+checkpointing (versioned blobs keyed by execution + version), while
+`ArtifactStore` is task-produced files, addressed by
+`(execution_id, task_id, path)` and meant to be referenced by workflow
+authors via a task's `outputs`/`inputs`. `FilesystemStore` is the one
+implementation of both today, storing snapshots and artifacts under the
+same base directory but in separate subtrees.
 
 ## `storage-postgres`, `storage-mysql`, `storage-sqlite`
 
@@ -143,7 +161,8 @@ control-plane/src/
 │   └── durable.rs                                          # DurableRouter<S>
 ├── notifier.rs                                                # TaskNotifier trait, NullTaskNotifier
 ├── lease_manager.rs                                              # LeaseManager<S>
-└── leadership.rs                                                    # LeadershipRunner<S>
+├── leadership.rs                                                    # LeadershipRunner<S>
+└── snapshot_manager.rs                                                 # SnapshotManager<S> — exists, not yet wired into ControlPlane
 ```
 
 Defines *what* distributed coordination needs — leases, routing,
@@ -231,6 +250,15 @@ cli/src/
   its own. Whether the `+ '_'` lifetime is needed on that blanket impl
   isn't predictable from the trait's shape; confirm by building, not by
   analogy to a similar-looking trait.
+- **Method names across traits implemented on the same struct must not
+  collide.** `FilesystemStore` implements both `SnapshotStore` and
+  `ArtifactStore`; if both traits used a plain `save`/`load`, Rust
+  couldn't disambiguate a call through the concrete struct without
+  fully-qualified syntax at every call site. The convention here is to
+  give each trait's methods distinct, self-describing names instead
+  (`save_snapshot`/`load_snapshot`/`delete_snapshots` vs.
+  `save_artifact`/`load_artifact`/`delete_artifacts`) so ordinary method
+  calls just work.
 
 See `MIRANDA_ARCHITECTURE.md` (repo root) for the full reasoning behind
 these, `MIRANDA_ROADMAP.md` for what's actually been built and verified

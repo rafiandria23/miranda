@@ -28,6 +28,11 @@ work completely before the next one is added.
   system for arbitrary user code is planned, see Roadmap below).
 - **A real HTTP API and CLI** for registering workflows, submitting
   executions, and checking status against a running server.
+- **Pass artifacts between tasks.** A `shell` task can declare `outputs`,
+  files it produces, and a dependent task can declare `inputs` that
+  reference an upstream task's output by name to pull it into its own
+  working directory before it runs. Local filesystem is the only storage
+  backend for this today.
 
 ## Quick start: run a workflow locally
 
@@ -165,7 +170,7 @@ what's merely compiled, and the open backlog, see `MIRANDA_ROADMAP.md`.
 
 | Type | Purpose | Key fields |
 | --- | --- | --- |
-| `shell` | Run a command | `command`, `env`, `cwd`, `shell`, `success_codes` |
+| `shell` | Run a command | `command`, `env`, `cwd`, `shell`, `success_codes`, `outputs`, `inputs` |
 | `http` | Make an HTTP request | `method`, `url`, `query`, `headers`, `body`, `success_codes` |
 | `wait` | Pause for a duration or until a timestamp | `duration` or `until` |
 | `noop` | No-op marker, resolved by the orchestrator without touching a worker | `message` (optional) |
