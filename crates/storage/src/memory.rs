@@ -23,11 +23,13 @@ use crate::{
     lease_store::LeaseStore,
     peer_store::{PeerInfo, PeerStore},
     router_store::RouterStore,
+    snapshot_store::SnapshotStore,
     task_queue_store::TaskQueueStore,
     workflow_store::WorkflowStore,
 };
 
 type DefinitionsMap = HashMap<WorkflowVersionId, (WorkflowId, u64, WorkflowDefinition)>;
+type SnapshotsMap = HashMap<(ExecutionId, u64), Vec<u8>>;
 type ArtifactsMap = HashMap<(ExecutionId, WorkflowTaskId, String), Vec<u8>>;
 
 #[derive(Default, Clone)]
@@ -40,6 +42,7 @@ pub struct InMemoryStore {
     join_token: Arc<RwLock<Option<String>>>,
     leadership: Arc<RwLock<Option<(String, OffsetDateTime)>>>,
     peers: Arc<RwLock<HashMap<String, (String, OffsetDateTime)>>>,
+    snapshots: Arc<RwLock<SnapshotsMap>>,
     artifacts: Arc<RwLock<ArtifactsMap>>,
 }
 
@@ -573,6 +576,87 @@ impl PeerStore for InMemoryStore {
             }
 
             Ok(stale_ids)
+        })
+    }
+}
+
+// =========================================================================
+// Snapshot Store Implementation
+// =========================================================================
+
+impl SnapshotStore for InMemoryStore {
+    fn save_snapshot<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+        version: u64,
+        data: &'a [u8],
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.snapshots
+                .write()
+                .await
+                .insert((execution_id, version), data.to_vec());
+
+            Ok(())
+        })
+    }
+
+    fn load_snapshot<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+        version: u64,
+    ) -> Pin<Box<dyn Future<Output = Result<Vec<u8>, StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.snapshots
+                .read()
+                .await
+                .get(&(execution_id, version))
+                .cloned()
+                .ok_or(StorageError::SnapshotNotFound {
+                    execution_id,
+                    version,
+                })
+        })
+    }
+
+    fn load_latest_snapshot<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+    ) -> Pin<Box<dyn Future<Output = Result<Option<(u64, Vec<u8>)>, StorageError>> + Send + 'a>>
+    {
+        Box::pin(async move {
+            let snapshots = self.snapshots.read().await;
+
+            let latest = snapshots
+                .keys()
+                .filter(|(e_id, _)| *e_id == execution_id)
+                .map(|(_, v)| *v)
+                .max();
+
+            let Some(version) = latest else {
+                return Ok(None);
+            };
+
+            let data = snapshots
+                .get(&(execution_id, version))
+                .cloned()
+                .expect("version just found via max() must exist");
+
+            Ok(Some((version, data)))
+        })
+    }
+
+    fn delete_snapshots<'a>(
+        &'a self,
+        execution_id: ExecutionId,
+    ) -> Pin<Box<dyn Future<Output = Result<(), StorageError>> + Send + 'a>> {
+        Box::pin(async move {
+            self.snapshots
+                .write()
+                .await
+                .retain(|(e_id, _), _| *e_id != execution_id);
+
+            Ok(())
         })
     }
 }
@@ -1320,6 +1404,151 @@ mod tests {
                 .iter()
                 .any(|p| p.id == "peer-1")
         );
+    }
+
+    // ---------------------------------------------------------------
+    // SnapshotStore
+    // ---------------------------------------------------------------
+
+    #[tokio::test]
+    async fn save_then_load_returns_same_data() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+
+        store
+            .save_snapshot(execution_id, 1, b"hello")
+            .await
+            .unwrap();
+
+        let data = store.load_snapshot(execution_id, 1).await.unwrap();
+
+        assert_eq!(data, b"hello");
+    }
+
+    #[tokio::test]
+    async fn save_overwrites_existing_version() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+
+        store
+            .save_snapshot(execution_id, 1, b"first")
+            .await
+            .unwrap();
+        store
+            .save_snapshot(execution_id, 1, b"second")
+            .await
+            .unwrap();
+
+        let data = store.load_snapshot(execution_id, 1).await.unwrap();
+
+        assert_eq!(data, b"second");
+    }
+
+    #[tokio::test]
+    async fn save_keeps_distinct_versions_separate() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+
+        store.save_snapshot(execution_id, 1, b"v1").await.unwrap();
+        store.save_snapshot(execution_id, 2, b"v2").await.unwrap();
+
+        assert_eq!(store.load_snapshot(execution_id, 1).await.unwrap(), b"v1");
+        assert_eq!(store.load_snapshot(execution_id, 2).await.unwrap(), b"v2");
+    }
+
+    #[tokio::test]
+    async fn load_missing_version_returns_snapshot_not_found() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+
+        store.save_snapshot(execution_id, 1, b"data").await.unwrap();
+
+        let err = store.load_snapshot(execution_id, 2).await.unwrap_err();
+
+        assert!(matches!(
+            err,
+            StorageError::SnapshotNotFound {
+                execution_id: eid,
+                version: 2,
+            } if eid == execution_id
+        ));
+    }
+
+    #[tokio::test]
+    async fn load_missing_execution_returns_snapshot_not_found() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+
+        let err = store.load_snapshot(execution_id, 1).await.unwrap_err();
+
+        assert!(matches!(err, StorageError::SnapshotNotFound { .. }));
+    }
+
+    #[tokio::test]
+    async fn load_latest_on_missing_execution_returns_none() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+
+        let result = store.load_latest_snapshot(execution_id).await.unwrap();
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn load_latest_returns_highest_version() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+
+        store.save_snapshot(execution_id, 1, b"v1").await.unwrap();
+        store.save_snapshot(execution_id, 3, b"v3").await.unwrap();
+        store.save_snapshot(execution_id, 2, b"v2").await.unwrap();
+
+        let (version, data) = store
+            .load_latest_snapshot(execution_id)
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(version, 3);
+        assert_eq!(data, b"v3");
+    }
+
+    #[tokio::test]
+    async fn delete_removes_all_versions() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+
+        store.save_snapshot(execution_id, 1, b"v1").await.unwrap();
+        store.save_snapshot(execution_id, 2, b"v2").await.unwrap();
+
+        store.delete_snapshots(execution_id).await.unwrap();
+
+        let result = store.load_latest_snapshot(execution_id).await.unwrap();
+
+        assert!(result.is_none());
+    }
+
+    #[tokio::test]
+    async fn delete_on_missing_execution_is_ok() {
+        let store = InMemoryStore::new();
+        let execution_id = ExecutionId::new();
+
+        store.delete_snapshots(execution_id).await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn delete_does_not_affect_other_executions() {
+        let store = InMemoryStore::new();
+        let a = ExecutionId::new();
+        let b = ExecutionId::new();
+
+        store.save_snapshot(a, 1, b"a").await.unwrap();
+        store.save_snapshot(b, 1, b"b").await.unwrap();
+
+        store.delete_snapshots(a).await.unwrap();
+
+        assert!(store.load_latest_snapshot(a).await.unwrap().is_none());
+        assert_eq!(store.load_snapshot(b, 1).await.unwrap(), b"b");
     }
 
     // ---------------------------------------------------------------
