@@ -3,6 +3,7 @@ use std::{
     io,
     path::{Path, PathBuf},
     pin::Pin,
+    sync::Arc,
 };
 use tokio::fs;
 
@@ -303,6 +304,10 @@ impl ArtifactStore for FilesystemStore {
             }
         })
     }
+}
+
+pub fn build_artifact_store(dir: impl Into<PathBuf>) -> Arc<dyn ArtifactStore> {
+    Arc::new(FilesystemStore::new(dir))
 }
 
 // =========================================================================

@@ -8,7 +8,7 @@ use miranda_control_plane::{
     router::{DurableRouter, Router},
 };
 use miranda_storage::{
-    artifact_store::ArtifactStore, filesystem::FilesystemStore, join_token_store::JoinTokenStore,
+    filesystem::build_artifact_store, join_token_store::JoinTokenStore,
     leadership_store::LeadershipStore, lease_store::LeaseStore, peer_store::PeerStore,
     workflow_store::WorkflowStore,
 };
@@ -283,7 +283,7 @@ async fn run_worker_only(args: Cli) -> Result<(), Box<dyn Error>> {
     );
 
     let artifact_dir = resolve_home_relative(&args.artifact_dir);
-    let artifact_store: Arc<dyn ArtifactStore> = Arc::new(FilesystemStore::new(artifact_dir));
+    let artifact_store = build_artifact_store(artifact_dir);
     let work_dir_root = resolve_home_relative("~/.miranda/work");
 
     let executor = Arc::new(DispatchExecutor::new(artifact_store, work_dir_root));
@@ -361,7 +361,7 @@ async fn run_colocated(args: Cli) -> Result<(), Box<dyn Error>> {
     ));
 
     let artifact_dir = resolve_home_relative(&args.artifact_dir);
-    let artifact_store: Arc<dyn ArtifactStore> = Arc::new(FilesystemStore::new(artifact_dir));
+    let artifact_store = build_artifact_store(artifact_dir);
     let work_dir_root = resolve_home_relative("~/.miranda/work");
 
     let executor = Arc::new(DispatchExecutor::new(artifact_store, work_dir_root));
